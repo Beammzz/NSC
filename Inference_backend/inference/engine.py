@@ -360,8 +360,20 @@ class InferenceEngine:
             if num_frames_with_hands < tuning.idle_min_frames_with_hands or (
                 not has_motion
             ):
+                if model.idle_idx is None:
+                    # This label map has no Idle class (the recovered 150-word
+                    # map doesn't): report the bypass with an empty word
+                    # instead of inventing class 0 at 100% confidence.
+                    return PredictionResult(
+                        word="",
+                        confidence=0.0,
+                        is_idle=True,
+                        is_uncertain=False,
+                        top=[],
+                        inference_micros=0,
+                    )
                 res = np.zeros(model.num_classes, dtype=np.float32)
-                res[model.idle_idx if model.idle_idx is not None else 0] = 1.0
+                res[model.idle_idx] = 1.0
                 is_idle = True
             else:
                 input_seq = tsl_preprocess.preprocess_sequence(seq_arr, self.config)

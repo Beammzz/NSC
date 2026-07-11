@@ -29,7 +29,8 @@ Python gRPC TSL inference service: receives landmark-frame streams from the Gola
 
 - Contract source of truth: `docs/api/tsl_inference.proto`. Wire frames carry exactly 441 floats (`docs/api/stream-schema.md`, schema_version 1); the service consumes only the position block (first 147) and recomputes hand normalization + velocity/acceleration itself.
 - Landmark path is gRPC bidirectional streaming only — no HTTP fallback (root DOX).
-- ⚠️ `tsl_preprocess.py` is a spec-based RECONSTRUCTION (the original was lost with `ai/`). If the original from the training repo is recovered, it REPLACES the reconstruction. Until the real `preprocess_config.json` is restored, predictions must not be trusted for accuracy evaluation.
+- ⚠️ `tsl_preprocess.py` is a spec-based RECONSTRUCTION (the original was lost with `ai/`). Its config keys match the recovered training `preprocess_config.json` (`hand_local_norm`, `hand_scale_norm`, `use_velocity`, `use_acceleration`, `confidence_threshold` — restored 2026-07-11), but the hand-normalization FORMULAS are assumptions (wrist-recenter; scale by max landmark distance from wrist). Live signing accuracy is the acceptance test; if the original module turns up, it replaces the reconstruction.
+- The recovered 150-class `label_map.json` has NO idle class: the idle bypass returns `is_idle=true` with an EMPTY `word` (confidence 0, empty `top`) — clients must key off `is_idle`, never the word.
 - `UploadModel` never overwrites live artifact files (Windows refuses replacing a memory-mapped model): each upload lands in `TSL_Output/uploads/<utc-ts>/` and `TSL_Output/active_model.json` points at the active set. Legacy layout (files directly in `TSL_Output/`) is the fallback when no manifest exists.
 - Uploads are validated (interpreter loads, label map parses and matches class count, feature dim matches preprocess config) before the swap; on failure the previous model stays live.
 - Tuning values (`SetTuning`) are runtime-only; they reset to `preprocess_config.json` values on restart.
@@ -40,7 +41,7 @@ Python gRPC TSL inference service: receives landmark-frame streams from the Gola
 ## Work Guidance
 
 - Run the service: `python -m inference.server` from `Inference_backend/` (listens on `SIGNMIND_AI_ADDR`, default `localhost:50051` — the gateway's default dial target).
-- Windows runtime: the TFLite runtime (`ai-edge-litert` or `tensorflow`) ships no win_arm64 wheels — run the service under an **x64** Python venv. Tests and `ruff` run fine on arm64 (the fake interpreter avoids the runtime).
+- Windows runtime: the TFLite runtime (`ai-edge-litert` or `tensorflow`) ships no win_arm64 wheels — run the service under the **x64** venv at `Inference_backend/.venv-x64` (what `dev.ps1` prefers; recreate with `<x64 python> -m venv .venv-x64` then `pip install grpcio numpy protobuf ai-edge-litert`). Tests and `ruff` run fine on arm64 (the fake interpreter avoids the runtime).
 - Regenerate stubs after any `docs/api/tsl_inference.proto` change (from repo root; needs `grpcio-tools` and, for Go, `protoc-gen-go` v1.36.11 + `protoc-gen-go-grpc` v1.6.2 in `~/go/bin`):
   ```
   python -m grpc_tools.protoc -I docs/api \

@@ -43,8 +43,8 @@ class TestFeatureDim:
 
     def test_position_only(self):
         config = dict(tp.DEFAULT_PREPROCESS_CONFIG)
-        config["add_velocity"] = False
-        config["add_acceleration"] = False
+        config["use_velocity"] = False
+        config["use_acceleration"] = False
         assert tp.feature_dim(config) == 147
 
 
@@ -66,7 +66,8 @@ class TestPreprocessSequence:
 
     def test_velocity_is_frame_delta(self):
         config = dict(tp.DEFAULT_PREPROCESS_CONFIG)
-        config["hand_norm"] = False  # isolate the delta math
+        config["hand_local_norm"] = False  # isolate the delta math
+        config["hand_scale_norm"] = False
         seq = make_seq(4)
         out = tp.preprocess_sequence(seq, config)
         vel = out[:, 147:294]
@@ -80,14 +81,38 @@ class TestPreprocessSequence:
         out = tp.preprocess_sequence(make_seq(1), tp.DEFAULT_PREPROCESS_CONFIG)
         np.testing.assert_allclose(out[0, 147:], np.zeros(294), atol=1e-6)
 
-    def test_hand_norm_recenters_on_wrist(self):
+    def test_hand_local_norm_recenters_on_wrist(self):
+        config = dict(tp.DEFAULT_PREPROCESS_CONFIG)
+        config["hand_scale_norm"] = False  # isolate the recentering
         seq = np.zeros((2, 147), dtype=np.float32)
         # Left hand block: wrist at (0.5, 0.5, 0.1), landmark 1 offset +0.2 in x.
         seq[:, 21:24] = [0.5, 0.5, 0.1]
         seq[:, 24:27] = [0.7, 0.5, 0.1]
-        out = tp.preprocess_sequence(seq, tp.DEFAULT_PREPROCESS_CONFIG)
+        out = tp.preprocess_sequence(seq, config)
         np.testing.assert_allclose(out[0, 21:24], [0.0, 0.0, 0.0], atol=1e-6)
         np.testing.assert_allclose(out[0, 24:27], [0.2, 0.0, 0.0], atol=1e-6)
+
+    def test_hand_scale_norm_unit_size(self):
+        # Full default config: recenter + scale. The same hand SHAPE at two
+        # different sizes must normalize identically (person invariance).
+        # All 21 landmarks are set — a detected MediaPipe hand always is.
+        def hand_seq(spread):
+            seq = np.zeros((1, 147), dtype=np.float32)
+            wrist = np.array([0.5, 0.5, 0.1], dtype=np.float32)
+            hand = np.zeros((21, 3), dtype=np.float32)
+            for i in range(21):
+                hand[i] = wrist + spread * np.array([i / 20.0, i / 40.0, 0.0])
+            seq[:, 21:84] = hand.reshape(-1)
+            return seq
+
+        small = tp.preprocess_sequence(hand_seq(0.1), tp.DEFAULT_PREPROCESS_CONFIG)
+        large = tp.preprocess_sequence(hand_seq(0.4), tp.DEFAULT_PREPROCESS_CONFIG)
+        np.testing.assert_allclose(small[0, :147], large[0, :147], atol=1e-6)
+        # Farthest landmark (i=20) sits at distance 1 from the wrist.
+        landmark_20 = small[0, 21 + 20 * 3 : 21 + 21 * 3]
+        np.testing.assert_allclose(
+            np.linalg.norm(landmark_20), 1.0, atol=1e-6
+        )
 
     def test_absent_hand_stays_zero(self):
         seq = make_seq(3)

@@ -102,6 +102,30 @@ class TestPrediction:
         assert result.inference_micros == 0
         assert fake.invocations == 0
 
+    def test_no_idle_class_bypasses_to_empty_word(self, tmp_path):
+        import json
+
+        no_idle_labels = {"สวัสดี": 0, "ขอบคุณ": 1, "รัก": 2, "ครอบครัว": 3}
+        (tmp_path / eng.MODEL_FILENAME).write_bytes(b"fake")
+        (tmp_path / eng.LABEL_MAP_FILENAME).write_text(
+            json.dumps(no_idle_labels, ensure_ascii=False), encoding="utf-8"
+        )
+        fake = FakeInterpreter([0.25] * 4)
+        engine = eng.InferenceEngine(
+            output_dir=str(tmp_path), interpreter_factory=lambda path: fake
+        )
+        session = engine.session()
+        frames = moving_frames()
+        frames[:, tp.POSE_DIMS :] = 0.0  # no hands -> bypass
+        result = None
+        for frame in frames:
+            result = session.add_frame(frame)
+        assert result.is_idle
+        assert result.word == ""
+        assert result.confidence == pytest.approx(0.0)
+        assert result.top == []
+        assert fake.invocations == 0
+
     def test_static_hands_bypass_to_idle(self, artifacts):
         engine, fake = make_engine(artifacts, [0.25] * NUM_CLASSES)
         session = engine.session()

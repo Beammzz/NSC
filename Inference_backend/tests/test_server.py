@@ -211,7 +211,7 @@ class TestTuning:
         state = stub.GetTuning(pb.GetTuningRequest())
         assert state.model_loaded
         assert state.num_classes == NUM_CLASSES
-        assert state.confidence_threshold == pytest.approx(0.5)
+        assert state.confidence_threshold == pytest.approx(0.6)
 
     def test_set_partial(self, stack):
         stub, engine, _ = stack
