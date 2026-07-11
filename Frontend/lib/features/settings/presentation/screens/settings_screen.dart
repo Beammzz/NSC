@@ -18,7 +18,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   void initState() {
     super.initState();
-    _urlController = TextEditingController(text: ref.read(settingsProvider).serverUrl);
+    _urlController = TextEditingController(
+      text: ref.read(settingsProvider).serverUrl,
+    );
   }
 
   @override
@@ -42,7 +44,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final connectionStatus = settings.useSimulatedStream
         ? ConnectionStatus.connected
         : ref.watch(tslConnectionStatusProvider).value ??
-            ConnectionStatus.disconnected;
+              ConnectionStatus.disconnected;
 
     return Scaffold(
       backgroundColor: AppTheme.darkNavy,
@@ -69,7 +71,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             // Scrollable Settings Content
             Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -77,16 +82,40 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     _buildCard(
                       children: [
                         SwitchListTile(
-                          title: const Text('โหมดกลางคืน (Dark Mode)', style: TextStyle(color: AppTheme.textLight, fontWeight: FontWeight.w500)),
-                          subtitle: Text('ปรับโทนสีพื้นหลังให้สบายตาในที่มืด', style: TextStyle(color: AppTheme.textMutedDark.withAlpha(200), fontSize: 12)),
+                          title: const Text(
+                            'โหมดกลางคืน (Dark Mode)',
+                            style: TextStyle(
+                              color: AppTheme.textLight,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          subtitle: Text(
+                            'ปรับโทนสีพื้นหลังให้สบายตาในที่มืด',
+                            style: TextStyle(
+                              color: AppTheme.textMutedDark.withAlpha(200),
+                              fontSize: 12,
+                            ),
+                          ),
                           value: settings.isDarkMode,
                           activeThumbColor: AppTheme.primaryAccent,
                           onChanged: notifier.toggleDarkMode,
                         ),
                         _buildDivider(),
                         SwitchListTile(
-                          title: const Text('แสดงโครงกระดูกมือ (Hand Skeleton)', style: TextStyle(color: AppTheme.textLight, fontWeight: FontWeight.w500)),
-                          subtitle: Text('แสดงเส้นและจุด MediaPipe บนภาพกล้อง', style: TextStyle(color: AppTheme.textMutedDark.withAlpha(200), fontSize: 12)),
+                          title: const Text(
+                            'แสดงโครงกระดูกมือ (Hand Skeleton)',
+                            style: TextStyle(
+                              color: AppTheme.textLight,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          subtitle: Text(
+                            'แสดงเส้นและจุด MediaPipe บนภาพกล้อง',
+                            style: TextStyle(
+                              color: AppTheme.textMutedDark.withAlpha(200),
+                              fontSize: 12,
+                            ),
+                          ),
                           value: settings.showHandSkeleton,
                           activeThumbColor: AppTheme.primaryAccent,
                           onChanged: notifier.toggleHandSkeleton,
@@ -95,7 +124,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     ),
                     const SizedBox(height: 24),
 
-                    _buildSectionHeader('การตรวจจับและกล้อง (Camera & Scanner)'),
+                    _buildSectionHeader(
+                      'การตรวจจับและกล้อง (Camera & Scanner)',
+                    ),
                     _buildCard(
                       children: [
                         Padding(
@@ -104,17 +135,34 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
                                 children: [
-                                  const Text('ความเชื่อมั่นขั้นต่ำ (Confidence)', style: TextStyle(color: AppTheme.textLight, fontWeight: FontWeight.w500)),
+                                  const Text(
+                                    'ความเชื่อมั่นขั้นต่ำ (Confidence)',
+                                    style: TextStyle(
+                                      color: AppTheme.textLight,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
                                   Text(
                                     '≥ ${(settings.confidenceThreshold * 100).round()}%',
-                                    style: const TextStyle(color: AppTheme.primaryAccent, fontWeight: FontWeight.w700, fontFamily: 'monospace'),
+                                    style: const TextStyle(
+                                      color: AppTheme.primaryAccent,
+                                      fontWeight: FontWeight.w700,
+                                      fontFamily: 'monospace',
+                                    ),
                                   ),
                                 ],
                               ),
                               const SizedBox(height: 4),
-                              Text('ระบบจะแสดงคำแปลเมื่อความแม่นยำสูงกว่าค่านี้', style: TextStyle(color: AppTheme.textMutedDark.withAlpha(200), fontSize: 12)),
+                              Text(
+                                'ระบบจะแสดงคำแปลเมื่อความแม่นยำสูงกว่าค่านี้',
+                                style: TextStyle(
+                                  color: AppTheme.textMutedDark.withAlpha(200),
+                                  fontSize: 12,
+                                ),
+                              ),
                               Slider(
                                 value: settings.confidenceThreshold,
                                 min: 0.70,
@@ -128,19 +176,42 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         ),
                         _buildDivider(),
                         ListTile(
-                          title: const Text('ความละเอียดกล้องหลัง', style: TextStyle(color: AppTheme.textLight, fontWeight: FontWeight.w500)),
-                          subtitle: Text('เลือกความคมชัดสำหรับการสแกนท่าทาง', style: TextStyle(color: AppTheme.textMutedDark.withAlpha(200), fontSize: 12)),
+                          title: const Text(
+                            'ความละเอียดกล้องหลัง',
+                            style: TextStyle(
+                              color: AppTheme.textLight,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          subtitle: Text(
+                            'เลือกความคมชัดสำหรับการสแกนท่าทาง',
+                            style: TextStyle(
+                              color: AppTheme.textMutedDark.withAlpha(200),
+                              fontSize: 12,
+                            ),
+                          ),
                           trailing: DropdownButton<String>(
                             value: settings.cameraResolution,
                             dropdownColor: AppTheme.cardDark,
-                            style: const TextStyle(color: AppTheme.textLight, fontWeight: FontWeight.w600),
+                            style: const TextStyle(
+                              color: AppTheme.textLight,
+                              fontWeight: FontWeight.w600,
+                            ),
                             underline: const SizedBox(),
                             items: const [
-                              DropdownMenuItem(value: '720p', child: Text('720p (แนะนำ)')),
-                              DropdownMenuItem(value: '1080p', child: Text('1080p HD')),
+                              DropdownMenuItem(
+                                value: '720p',
+                                child: Text('720p (แนะนำ)'),
+                              ),
+                              DropdownMenuItem(
+                                value: '1080p',
+                                child: Text('1080p HD'),
+                              ),
                             ],
                             onChanged: (val) {
-                              if (val != null) notifier.setCameraResolution(val);
+                              if (val != null) {
+                                notifier.setCameraResolution(val);
+                              }
                             },
                           ),
                         ),
@@ -148,20 +219,46 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     ),
                     const SizedBox(height: 24),
 
-                    _buildSectionHeader('เสียงและการสั่นแจ้งเตือน (Audio & Haptics)'),
+                    _buildSectionHeader(
+                      'เสียงและการสั่นแจ้งเตือน (Audio & Haptics)',
+                    ),
                     _buildCard(
                       children: [
                         SwitchListTile(
-                          title: const Text('อ่านออกเสียงอัตโนมัติ (Auto TTS)', style: TextStyle(color: AppTheme.textLight, fontWeight: FontWeight.w500)),
-                          subtitle: Text('พูดข้อความที่แปลได้ทันทีเมื่อตรวจพบประโยค', style: TextStyle(color: AppTheme.textMutedDark.withAlpha(200), fontSize: 12)),
+                          title: const Text(
+                            'อ่านออกเสียงอัตโนมัติ (Auto TTS)',
+                            style: TextStyle(
+                              color: AppTheme.textLight,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          subtitle: Text(
+                            'พูดข้อความที่แปลได้ทันทีเมื่อตรวจพบประโยค',
+                            style: TextStyle(
+                              color: AppTheme.textMutedDark.withAlpha(200),
+                              fontSize: 12,
+                            ),
+                          ),
                           value: settings.autoSpeak,
                           activeThumbColor: AppTheme.primaryAccent,
                           onChanged: notifier.toggleAutoSpeak,
                         ),
                         _buildDivider(),
                         SwitchListTile(
-                          title: const Text('สั่นแจ้งเตือนเมื่อพบคำศัพท์', style: TextStyle(color: AppTheme.textLight, fontWeight: FontWeight.w500)),
-                          subtitle: Text('ตอบสนองด้วยการสั่นสั้นๆ เมื่อแปลผลสำเร็จ', style: TextStyle(color: AppTheme.textMutedDark.withAlpha(200), fontSize: 12)),
+                          title: const Text(
+                            'สั่นแจ้งเตือนเมื่อพบคำศัพท์',
+                            style: TextStyle(
+                              color: AppTheme.textLight,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          subtitle: Text(
+                            'ตอบสนองด้วยการสั่นสั้นๆ เมื่อแปลผลสำเร็จ',
+                            style: TextStyle(
+                              color: AppTheme.textMutedDark.withAlpha(200),
+                              fontSize: 12,
+                            ),
+                          ),
                           value: settings.hapticFeedback,
                           activeThumbColor: AppTheme.primaryAccent,
                           onChanged: notifier.toggleHapticFeedback,
@@ -174,8 +271,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     _buildCard(
                       children: [
                         SwitchListTile(
-                          title: const Text('โหมดจำลอง (Demo Mode)', style: TextStyle(color: AppTheme.textLight, fontWeight: FontWeight.w500)),
-                          subtitle: Text('ใช้ข้อมูลตัวอย่างแทนการเชื่อมต่อเซิร์ฟเวอร์จริง', style: TextStyle(color: AppTheme.textMutedDark.withAlpha(200), fontSize: 12)),
+                          title: const Text(
+                            'โหมดจำลอง (Demo Mode)',
+                            style: TextStyle(
+                              color: AppTheme.textLight,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          subtitle: Text(
+                            'ใช้ข้อมูลตัวอย่างแทนการเชื่อมต่อเซิร์ฟเวอร์จริง',
+                            style: TextStyle(
+                              color: AppTheme.textMutedDark.withAlpha(200),
+                              fontSize: 12,
+                            ),
+                          ),
                           value: settings.useSimulatedStream,
                           activeThumbColor: AppTheme.primaryAccent,
                           onChanged: notifier.toggleSimulatedStream,
@@ -186,9 +295,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('ที่อยู่เซิร์ฟเวอร์ (Server URL)', style: TextStyle(color: AppTheme.textLight, fontWeight: FontWeight.w500)),
+                              const Text(
+                                'ที่อยู่เซิร์ฟเวอร์ (Server URL)',
+                                style: TextStyle(
+                                  color: AppTheme.textLight,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
                               const SizedBox(height: 4),
-                              Text('ปลายทาง WebSocket ของ SignMind Backend เช่น ws://10.0.2.2:8080', style: TextStyle(color: AppTheme.textMutedDark.withAlpha(200), fontSize: 12)),
+                              Text(
+                                'ปลายทาง WebSocket ของ SignMind Backend เช่น ws://10.0.2.2:8080',
+                                style: TextStyle(
+                                  color: AppTheme.textMutedDark.withAlpha(200),
+                                  fontSize: 12,
+                                ),
+                              ),
                               const SizedBox(height: 10),
                               TextFormField(
                                 key: const Key('serverUrlField'),
@@ -196,24 +317,43 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                 enabled: !settings.useSimulatedStream,
                                 onFieldSubmitted: (_) => _connect(notifier),
                                 keyboardType: TextInputType.url,
-                                style: const TextStyle(color: AppTheme.textLight, fontFamily: 'monospace', fontSize: 14),
+                                style: const TextStyle(
+                                  color: AppTheme.textLight,
+                                  fontFamily: 'monospace',
+                                  fontSize: 14,
+                                ),
                                 decoration: InputDecoration(
                                   hintText: 'ws://10.0.2.2:8080',
-                                  hintStyle: TextStyle(color: AppTheme.textMutedDark.withAlpha(150), fontFamily: 'monospace', fontSize: 14),
-                                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                  hintStyle: TextStyle(
+                                    color: AppTheme.textMutedDark.withAlpha(
+                                      150,
+                                    ),
+                                    fontFamily: 'monospace',
+                                    fontSize: 14,
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 12,
+                                  ),
                                   filled: true,
                                   fillColor: AppTheme.darkNavy,
                                   enabledBorder: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(12),
-                                    borderSide: const BorderSide(color: AppTheme.borderDark),
+                                    borderSide: const BorderSide(
+                                      color: AppTheme.borderDark,
+                                    ),
                                   ),
                                   focusedBorder: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(12),
-                                    borderSide: const BorderSide(color: AppTheme.primaryAccent),
+                                    borderSide: const BorderSide(
+                                      color: AppTheme.primaryAccent,
+                                    ),
                                   ),
                                   disabledBorder: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(12),
-                                    borderSide: BorderSide(color: AppTheme.borderDark.withAlpha(100)),
+                                    borderSide: BorderSide(
+                                      color: AppTheme.borderDark.withAlpha(100),
+                                    ),
                                   ),
                                 ),
                               ),
@@ -242,56 +382,105 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         ListTile(
                           leading: Container(
                             padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(color: AppTheme.primaryAccent.withAlpha(46), shape: BoxShape.circle),
-                            child: const Icon(Icons.info_outline, color: AppTheme.primaryAccent),
+                            decoration: BoxDecoration(
+                              color: AppTheme.primaryAccent.withAlpha(46),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.info_outline,
+                              color: AppTheme.primaryAccent,
+                            ),
                           ),
-                          title: const Text('SignMind AI v1.0.0', style: TextStyle(color: AppTheme.textLight, fontWeight: FontWeight.w600)),
-                          subtitle: Text('Cross-platform TSL Real-time Translator & Tutor', style: TextStyle(color: AppTheme.textMutedDark.withAlpha(200), fontSize: 12)),
+                          title: const Text(
+                            'SignMind AI v1.0.0',
+                            style: TextStyle(
+                              color: AppTheme.textLight,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          subtitle: Text(
+                            'Made with Love by Beammzz, Chengzy-gif, KrasidithSun ❤️',
+                            style: TextStyle(
+                              color: AppTheme.textMutedDark.withAlpha(200),
+                              fontSize: 12,
+                            ),
+                          ),
                         ),
                         _buildDivider(),
-                        Builder(builder: (context) {
-                          final (label, thaiLabel, color, icon) = switch (connectionStatus) {
-                            ConnectionStatus.connected => (
+                        Builder(
+                          builder: (context) {
+                            final (
+                              label,
+                              thaiLabel,
+                              color,
+                              icon,
+                            ) = switch (connectionStatus) {
+                              ConnectionStatus.connected => (
                                 'ACTIVE',
                                 'สถานะ: เชื่อมต่อและพร้อมใช้งาน (WebSocket WSS)',
                                 AppTheme.successGreen,
                                 Icons.cloud_done_outlined,
                               ),
-                            ConnectionStatus.connecting => (
+                              ConnectionStatus.connecting => (
                                 'CONNECTING',
                                 'สถานะ: กำลังเชื่อมต่อ...',
                                 AppTheme.warningOrange,
                                 Icons.cloud_sync_outlined,
                               ),
-                            ConnectionStatus.disconnected => (
+                              ConnectionStatus.disconnected => (
                                 'DISCONNECTED',
                                 'สถานะ: ไม่ได้เชื่อมต่อกับเซิร์ฟเวอร์',
                                 AppTheme.textMutedLight,
                                 Icons.cloud_off_outlined,
                               ),
-                          };
-                          return ListTile(
-                            leading: Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(color: color.withAlpha(46), shape: BoxShape.circle),
-                              child: Icon(icon, color: color),
-                            ),
-                            title: const Text('เซิร์ฟเวอร์ AI & gRPC', style: TextStyle(color: AppTheme.textLight, fontWeight: FontWeight.w600)),
-                            subtitle: Text(thaiLabel, style: TextStyle(color: AppTheme.textMutedDark.withAlpha(200), fontSize: 12)),
-                            trailing: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: color.withAlpha(46),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: color.withAlpha(128)),
+                            };
+                            return ListTile(
+                              leading: Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: color.withAlpha(46),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(icon, color: color),
                               ),
-                              child: Text(
-                                label,
-                                style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w700),
+                              title: const Text(
+                                'เซิร์ฟเวอร์ AI & gRPC',
+                                style: TextStyle(
+                                  color: AppTheme.textLight,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
-                            ),
-                          );
-                        }),
+                              subtitle: Text(
+                                thaiLabel,
+                                style: TextStyle(
+                                  color: AppTheme.textMutedDark.withAlpha(200),
+                                  fontSize: 12,
+                                ),
+                              ),
+                              trailing: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: color.withAlpha(46),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: color.withAlpha(128),
+                                  ),
+                                ),
+                                child: Text(
+                                  label,
+                                  style: TextStyle(
+                                    color: color,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
                       ],
                     ),
                     const SizedBox(height: 32),

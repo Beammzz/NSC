@@ -75,6 +75,12 @@ class SimulatedTslStreamService implements TslStreamService {
     });
   }
 
+  void emitTestFrame(TranslationFrame frame) {
+    if (!_controller.isClosed) {
+      _controller.add(frame);
+    }
+  }
+
   @override
   void stop() {
     _isActive = false;

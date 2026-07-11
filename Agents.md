@@ -101,7 +101,7 @@ repository split and are not yet rebuilt; recreate them under
 - Naming: `snake_case` files, `PascalCase` classes, `camelCase` variables
 - Each feature lives in `Frontend/lib/features/<name>/` with its own `presentation/`, `domain/`, `data/` layers
 - Real-time recognition (scanner & tutor) extracts pose + hand landmarks locally and streams feature vectors via WebSocket to the Golang backend. The feature vector layout is defined in the Feature Vector Spec above — do not restate numbers here.
-- Conversational AI and Speech Recognition connect via REST/WebSocket API
+- Conversational AI connects via REST/WebSocket API (`/api/v1/conversation`); Speech Recognition (STT) and Text-to-Speech (TTS) run on-device on the mobile client.
 - **Verification Mandate**: Whenever Flutter code is touched, the Agent MUST run `flutter analyze` and `flutter test`.
 - **Test Creation Mandate**: When developing a new feature, the Agent MUST create a corresponding test file so that future bug fixes cause less damage to production.
 
@@ -123,7 +123,7 @@ repository split and are not yet rebuilt; recreate them under
   - Tokens are transmitted only via HTTPS/WSS; never in URL query parameters
 - Real-time TSL translation frames are streamed to `/api/v1/stream`; backend forwards landmark sequences to the internal Python AI service via **gRPC** (bidirectional streaming). HTTP fallback is not permitted for the landmark stream path.
 - The WebSocket message payload schema for `/api/v1/stream` is versioned and defined in `docs/api/stream-schema.md`; every payload includes a `schema_version` field. Breaking changes require a version bump and a DOX update.
-- NLP calls go through `/api/v1/conversation`; Speech Recognition through `/api/v1/speech`
+- NLP and Conversational AI bridge calls go through `/api/v1/conversation` (returns `reply_text`, `reply_sign_gloss`, and server-generated `keypoint_transitions` with LLM auto-correction for client avatar rendering); STT and TTS execute on-device on the client
 - Error responses follow RFC 7807 (Problem Details for HTTP APIs)
 - Sensitive user progress data must never be logged in plain text
 - **Verification Mandate**: Whenever Go code is touched, the Agent MUST run `go vet ./...` and `go test ./...`.

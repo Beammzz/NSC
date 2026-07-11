@@ -9,6 +9,9 @@
 .history
 
 
+# Temporary File
+Temp.txt
+
 
 # Flutter repo-specific
 /bin/cache/

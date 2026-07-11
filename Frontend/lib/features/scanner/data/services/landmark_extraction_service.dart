@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -215,8 +216,9 @@ class MediaPipeLandmarkExtractionService implements LandmarkExtractionService {
 // arrive over the EventChannel); the simulated feed is used elsewhere and under
 // `flutter test`, where no camera or platform channels exist.
 final landmarkExtractionServiceProvider = Provider<LandmarkExtractionService>((ref) {
+  final isTest = Platform.environment.containsKey('FLUTTER_TEST');
   final LandmarkExtractionService service =
-      (!kIsWeb && defaultTargetPlatform == TargetPlatform.android)
+      (!isTest && !kIsWeb && defaultTargetPlatform == TargetPlatform.android)
           ? MediaPipeLandmarkExtractionService()
           : SimulatedLandmarkExtractionService();
   ref.onDispose(service.dispose);

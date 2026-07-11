@@ -49,12 +49,15 @@ class CameraPreviewView(
     private val analysisExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private var handLandmarker: HandLandmarker? = null
     private var poseLandmarker: PoseLandmarker? = null
-    private var frameTimestamp = 0L
+    private var lastTimestampMs = 0L
 
     // Drops frames that arrive while the previous one is still being analyzed so
     // the executor queue never backs up (STRATEGY_KEEP_ONLY_LATEST + this guard).
     @Volatile
     private var analyzing = false
+
+    @Volatile
+    private var isDisposed = false
 
     init {
         // TextureView (not the default SurfaceView) so the preview composites
@@ -66,6 +69,7 @@ class CameraPreviewView(
 
     /** Binds the preview + analysis use cases, once the CAMERA permission is granted. */
     fun startCamera() {
+        if (isDisposed) return
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
             != PackageManager.PERMISSION_GRANTED
         ) {
@@ -73,6 +77,7 @@ class CameraPreviewView(
         }
         val future = ProcessCameraProvider.getInstance(context)
         future.addListener({
+            if (isDisposed) return@addListener
             val provider = future.get()
             cameraProvider = provider
             val preview = Preview.Builder().build().also {
@@ -94,6 +99,7 @@ class CameraPreviewView(
 
     /** Switches the bound camera between "back" and "front" and rebinds. */
     fun setLens(facing: String) {
+        if (isDisposed) return
         lensSelector = if (facing == "front") {
             CameraSelector.DEFAULT_FRONT_CAMERA
         } else {
@@ -104,19 +110,25 @@ class CameraPreviewView(
 
     /** Runs on [analysisExecutor]: one frame -> hands + pose -> emit to Dart. */
     private fun analyze(image: ImageProxy) {
-        if (analyzing) {
+        if (isDisposed || analyzing) {
             image.close()
             return
         }
         analyzing = true
         try {
             ensureLandmarkers()
+            if (isDisposed) return
             val t0 = SystemClock.elapsedRealtime()
             val mpImage = BitmapImageBuilder(image.toUprightBitmap()).build()
             val t1 = SystemClock.elapsedRealtime()
-            // VIDEO mode requires strictly increasing timestamps per landmarker;
-            // a per-frame counter satisfies that for both models.
-            val ts = frameTimestamp++
+            // VIDEO mode requires strictly increasing timestamps per landmarker,
+            // and PoseLandmarker's built-in landmark smoothing derives its filter
+            // strength from the timestamp deltas — a 1ms-per-frame counter made it
+            // over-smooth ~70x, so the pose skeleton trailed the body. Feed real
+            // elapsed milliseconds instead (guarded to stay strictly increasing).
+            val nowMs = SystemClock.elapsedRealtime()
+            val ts = if (nowMs > lastTimestampMs) nowMs else lastTimestampMs + 1
+            lastTimestampMs = ts
             val handResult = handLandmarker?.detectForVideo(mpImage, ts)
             val t2 = SystemClock.elapsedRealtime()
             val poseResult = poseLandmarker?.detectForVideo(mpImage, ts)
@@ -132,6 +144,7 @@ class CameraPreviewView(
     }
 
     private fun ensureLandmarkers() {
+        if (isDisposed) return
         // Both models default to CPU, which caps two-model throughput at ~6fps on
         // this device; run them on the GPU delegate and fall back to CPU only if
         // GPU init throws (unsupported driver / emulator).
@@ -238,13 +251,20 @@ class CameraPreviewView(
     override fun getView(): View = previewView
 
     override fun dispose() {
+        isDisposed = true
         cameraProvider?.unbindAll()
         cameraProvider = null
+        analysisExecutor.execute {
+            try {
+                handLandmarker?.close()
+            } catch (_: Exception) {}
+            try {
+                poseLandmarker?.close()
+            } catch (_: Exception) {}
+            handLandmarker = null
+            poseLandmarker = null
+        }
         analysisExecutor.shutdown()
-        handLandmarker?.close()
-        poseLandmarker?.close()
-        handLandmarker = null
-        poseLandmarker = null
     }
 
     companion object {

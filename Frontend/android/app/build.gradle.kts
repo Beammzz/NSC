@@ -38,6 +38,16 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+
+    // Compress native libs so the OS extracts them at install time,
+    // working around 16 KB page-alignment issues in third-party .so
+    // files (MediaPipe, CameraX, libflutter.so) until upstream ships
+    // aligned binaries.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
 }
 
 kotlin {

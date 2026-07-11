@@ -70,25 +70,7 @@ class _CameraViewportState extends ConsumerState<CameraViewport> {
               // no hardware, or under `flutter test`).
               Positioned.fill(child: _buildCameraLayer(cameraAsync)),
 
-              // Camera feed subtitle
-              Positioned(
-                top: 12,
-                left: 0,
-                right: 0,
-                child: Text(
-                  'CAMERA FEED · กล้องหลัง 720p',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontFamily: 'monospace',
-                    fontSize: 10,
-                    letterSpacing: 1.2,
-                    color: AppTheme.textMutedDark.withAlpha(128),
-                  ),
-                ),
-              ),
 
-              // Corner scan frame brackets
-              _buildCornerBrackets(),
 
               // MediaPipe body skeleton — both 21-point hands plus the 7 upper
               // pose points — painted over the full preview so it tracks the
@@ -270,76 +252,7 @@ class _CameraViewportState extends ConsumerState<CameraViewport> {
     );
   }
 
-  Widget _buildCornerBrackets() {
-    const color = Color(0xFF6EA8EE);
-    const double len = 24.0;
-    const double thick = 2.5;
 
-    return Stack(
-      children: [
-        Positioned(
-          top: 26,
-          left: 26,
-          child: Container(
-            width: len,
-            height: len,
-            decoration: const BoxDecoration(
-              border: Border(
-                top: BorderSide(color: color, width: thick),
-                left: BorderSide(color: color, width: thick),
-              ),
-              borderRadius: BorderRadius.only(topLeft: Radius.circular(8)),
-            ),
-          ),
-        ),
-        Positioned(
-          top: 26,
-          right: 26,
-          child: Container(
-            width: len,
-            height: len,
-            decoration: const BoxDecoration(
-              border: Border(
-                top: BorderSide(color: color, width: thick),
-                right: BorderSide(color: color, width: thick),
-              ),
-              borderRadius: BorderRadius.only(topRight: Radius.circular(8)),
-            ),
-          ),
-        ),
-        Positioned(
-          bottom: 30,
-          left: 26,
-          child: Container(
-            width: len,
-            height: len,
-            decoration: const BoxDecoration(
-              border: Border(
-                bottom: BorderSide(color: color, width: thick),
-                left: BorderSide(color: color, width: thick),
-              ),
-              borderRadius: BorderRadius.only(bottomLeft: Radius.circular(8)),
-            ),
-          ),
-        ),
-        Positioned(
-          bottom: 30,
-          right: 26,
-          child: Container(
-            width: len,
-            height: len,
-            decoration: const BoxDecoration(
-              border: Border(
-                bottom: BorderSide(color: color, width: thick),
-                right: BorderSide(color: color, width: thick),
-              ),
-              borderRadius: BorderRadius.only(bottomRight: Radius.circular(8)),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
 }
 
 /// Hybrid-composition host for the native CameraX preview PlatformView. Hybrid

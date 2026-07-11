@@ -1,27 +1,29 @@
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:signmind/core/services/tts_service.dart';
 import 'package:signmind/features/scanner/data/services/feature_vector_builder.dart';
 import 'package:signmind/features/scanner/data/services/landmark_extraction_service.dart';
 import 'package:signmind/features/scanner/data/services/tsl_stream_service.dart';
 import 'package:signmind/features/scanner/domain/models/scanner_models.dart';
+import 'package:signmind/features/settings/presentation/providers/settings_provider.dart';
 
 class ScannerNotifier extends Notifier<ScannerState> {
   StreamSubscription<RawLandmarkFrame>? _frameSub;
   StreamSubscription<TranslationFrame>? _streamSub;
   StreamSubscription<ConnectionStatus>? _statusSub;
+  StreamSubscription<bool>? _ttsSub;
 
   @override
   ScannerState build() {
     final landmarkService = ref.watch(landmarkExtractionServiceProvider);
     final streamService = ref.watch(tslStreamServiceProvider);
+    final ttsService = ref.watch(ttsServiceProvider);
 
     _frameSub?.cancel();
     _streamSub?.cancel();
     _statusSub?.cancel();
+    _ttsSub?.cancel();
 
-    // A single per-frame stream drives both the overlay (full body layout:
-    // both hands + upper pose) and the 147-dim body-normalized vector sent to
-    // the server (WebSocketTslStreamService.sendVector; no-op while simulated).
     _frameSub = landmarkService.frameStream.listen((frame) {
       if (state.isScanning) {
         state = state.copyWith(currentFrame: frame);
@@ -33,13 +35,19 @@ class ScannerNotifier extends Notifier<ScannerState> {
       if (!state.isScanning) return;
 
       List<String> newSentence = List.from(state.sentence);
+      bool wordAdded = false;
       if (!frame.isDetecting && frame.word.isNotEmpty && frame.word != '…') {
         if (newSentence.isEmpty || newSentence.last != frame.word) {
           newSentence.add(frame.word);
+          wordAdded = true;
           if (newSentence.length > 6) {
             newSentence = newSentence.sublist(newSentence.length - 6);
           }
         }
+      }
+
+      if (wordAdded && ref.read(settingsProvider).autoSpeak) {
+        ref.read(ttsServiceProvider).speak(frame.word);
       }
 
       state = state.copyWith(
@@ -56,10 +64,15 @@ class ScannerNotifier extends Notifier<ScannerState> {
       state = state.copyWith(connectionStatus: status);
     });
 
+    _ttsSub = ttsService.isSpeakingStream.listen((speaking) {
+      state = state.copyWith(isSpeaking: speaking);
+    });
+
     ref.onDispose(() {
       _frameSub?.cancel();
       _streamSub?.cancel();
       _statusSub?.cancel();
+      _ttsSub?.cancel();
     });
 
     landmarkService.start();
@@ -89,7 +102,7 @@ class ScannerNotifier extends Notifier<ScannerState> {
   Future<void> speakSentence() async {
     if (state.sentence.isEmpty || state.isSpeaking) return;
     state = state.copyWith(isSpeaking: true);
-    await Future.delayed(const Duration(milliseconds: 1800));
+    await ref.read(ttsServiceProvider).speak(state.sentence.join(' '));
     state = state.copyWith(isSpeaking: false);
   }
 }

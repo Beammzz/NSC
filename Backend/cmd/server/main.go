@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/config"
+	"gitea.harumi.dev/Harumi/NSC/backend/internal/conversation"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/stream"
 )
 
@@ -18,6 +19,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/stream", stream.NewHandler(aiClient))
+	mux.HandleFunc("/api/v1/conversation", conversation.Handler())
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
