@@ -1,0 +1,165 @@
+// TSL inference gRPC contract between the Golang backend gateway and the
+// Python AI inference service (bidirectional streaming — no HTTP fallback,
+// per root DOX). Source of truth lives here in docs/api/; generated stubs:
+//   Go:     Backend/internal/pb/
+//   Python: Inference_backend/inference/pb/
+// Regeneration commands are documented in Backend/AGENTS.md and
+// Inference_backend/AGENTS.md.
+syntax = "proto3";
+
+package signmind.inference.v1;
+
+option go_package = "gitea.harumi.dev/Harumi/NSC/backend/internal/pb;pb";
+
+service TslInference {
+  // Client (backend) streams landmark frames; server (Python) streams
+  // predictions whenever its 30-frame sliding window is full.
+  rpc StreamInference(stream LandmarkFrame) returns (stream Prediction);
+
+  // Atomically replace the LSTM model and its companion files. The client
+  // streams, per file, one FileHeader followed by that file's chunks; the
+  // model file and label map are both required in a single call (preprocess
+  // config optional). The server validates the staged files (interpreter
+  // loads, label map parses) before hot-swapping; on any failure the
+  // previously loaded model stays live and the RPC returns an error status.
+  rpc UploadModel(stream UploadModelRequest) returns (UploadModelResponse);
+
+  // Server streams its log records to the gateway: first up to
+  // `history_lines` buffered entries, then live entries until the client
+  // cancels.
+  rpc StreamLogs(StreamLogsRequest) returns (stream LogEntry);
+
+  // Read / adjust runtime inference tuning (thresholds). SetTuning applies
+  // only the fields present in the request and returns the full resulting
+  // state. Values are runtime-only: they reset to preprocess_config.json
+  // defaults on service restart.
+  rpc GetTuning(GetTuningRequest) returns (TuningState);
+  rpc SetTuning(SetTuningRequest) returns (TuningState);
+}
+
+message LandmarkFrame {
+  // Monotonic per-connection frame counter (mirrors the WS `seq`).
+  uint64 seq = 1;
+  // Client capture time, Unix epoch milliseconds.
+  int64 timestamp_ms = 2;
+  // 441 floats per the root Feature Vector Spec (Agents.md). The service
+  // consumes the position block (first 147) and recomputes deltas after
+  // person-invariant normalization, mirroring training.
+  repeated float features = 3;
+  // True to clear the server-side sliding window; `features` may be empty.
+  bool reset = 4;
+}
+
+message Prediction {
+  // `seq` of the newest frame included in the window.
+  uint64 seq = 1;
+  // Top-1 label from label_map.json; empty when is_uncertain.
+  string word = 2;
+  // Top-1 softmax probability.
+  float confidence = 3;
+  // Idle/no-hands bypass fired (no model invocation).
+  bool is_idle = 4;
+  // Top-1 below the trained confidence threshold.
+  bool is_uncertain = 5;
+  // Up to 5 entries, descending probability, prob > 0.01.
+  repeated ClassProb top = 6;
+  // Inference wall time in microseconds.
+  int64 inference_micros = 7;
+}
+
+message ClassProb {
+  string label = 1;
+  float prob = 2;
+}
+
+// ---- UploadModel ----
+
+enum FileKind {
+  FILE_KIND_UNSPECIFIED = 0;
+  // The LSTM .tflite flatbuffer (required).
+  FILE_KIND_TFLITE_MODEL = 1;
+  // label_map.json: {"label": index, ...} (required).
+  FILE_KIND_LABEL_MAP = 2;
+  // preprocess_config.json saved by training (optional).
+  FILE_KIND_PREPROCESS_CONFIG = 3;
+}
+
+message FileHeader {
+  FileKind kind = 1;
+  // Original filename, informational only; the server picks storage names.
+  string filename = 2;
+  // Total file size in bytes; the server rejects mismatched uploads.
+  uint64 size_bytes = 3;
+}
+
+message UploadModelRequest {
+  oneof payload {
+    // Starts a new file; must precede that file's chunks.
+    FileHeader header = 1;
+    // Next chunk of the current file (suggested <= 1 MiB per message).
+    bytes chunk = 2;
+  }
+}
+
+message UploadModelResponse {
+  // True when the new model is live (always true on OK status).
+  bool reloaded = 1;
+  // Number of classes in the uploaded label map.
+  uint32 num_classes = 2;
+  // Model input window length (frames), read from the interpreter.
+  uint32 sequence_len = 3;
+  // Model input feature dimension, read from the interpreter.
+  uint32 feature_dim = 4;
+}
+
+// ---- StreamLogs ----
+
+enum LogLevel {
+  LOG_LEVEL_UNSPECIFIED = 0;
+  LOG_LEVEL_DEBUG = 1;
+  LOG_LEVEL_INFO = 2;
+  LOG_LEVEL_WARNING = 3;
+  LOG_LEVEL_ERROR = 4;
+}
+
+message StreamLogsRequest {
+  // Minimum level to receive; UNSPECIFIED means INFO.
+  LogLevel min_level = 1;
+  // How many buffered past entries to replay before live entries (0 = none;
+  // capped by the server-side ring buffer size).
+  uint32 history_lines = 2;
+}
+
+message LogEntry {
+  // Record time, Unix epoch milliseconds.
+  int64 timestamp_ms = 1;
+  LogLevel level = 2;
+  // Python logger name (e.g. "inference.engine").
+  string logger = 3;
+  string message = 4;
+}
+
+// ---- Tuning ----
+
+message GetTuningRequest {}
+
+// All fields optional: only those present are applied.
+message SetTuningRequest {
+  // Reject predictions whose top-1 softmax is below this (0.0–1.0).
+  optional float confidence_threshold = 1;
+  // Idle bypass: minimum frames (of the window) with any hand present.
+  optional uint32 idle_min_frames_with_hands = 2;
+  // Idle bypass: mean per-coordinate std-dev below this counts as static.
+  optional float idle_motion_std_threshold = 3;
+}
+
+message TuningState {
+  float confidence_threshold = 1;
+  uint32 idle_min_frames_with_hands = 2;
+  float idle_motion_std_threshold = 3;
+  // Read-only facts about the loaded model, for webui display.
+  bool model_loaded = 4;
+  uint32 num_classes = 5;
+  uint32 sequence_len = 6;
+  uint32 feature_dim = 7;
+}

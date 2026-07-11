@@ -1,0 +1,30 @@
+[project]
+name = "signmind-inference"
+version = "0.1.0"
+description = "SignMind AI — Python gRPC TSL inference service"
+requires-python = ">=3.10"
+dependencies = [
+    "grpcio>=1.81",
+    "numpy>=1.26",
+    "protobuf>=5.27",
+    # TFLite runtime: install ONE of these in the runtime venv (x64 on
+    # Windows — neither ships win_arm64 wheels, see Inference_backend/AGENTS.md):
+    #   ai-edge-litert  (preferred)  or  tensorflow
+]
+
+[dependency-groups]
+dev = [
+    "grpcio-tools>=1.81",
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "tests"]
+
+[tool.ruff]
+extend-exclude = ["inference/pb"]  # generated stubs
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]

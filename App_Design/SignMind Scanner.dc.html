@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta charset="utf-8">
+<title>SignMind AI — หน้าสแกนภาษามือ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body { margin:0; background:#e8edf4; font-family:'IBM Plex Sans Thai',system-ui,sans-serif; }
+  a { color:#1e6fd9; } a:hover { color:#0f2f5c; }
+  @keyframes sm-scanline { 0%{transform:translateY(0);opacity:0} 8%{opacity:.9} 92%{opacity:.9} 100%{transform:translateY(300px);opacity:0} }
+  @keyframes sm-pulse { 0%,100%{opacity:.55} 50%{opacity:1} }
+  @keyframes sm-blink { 0%,100%{opacity:1} 50%{opacity:.25} }
+</style>
+</helmet>
+
+<div style="min-height:100vh; display:flex; align-items:center; justify-content:center; padding:36px 20px; box-sizing:border-box">
+<x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" dark="{{ true }}" hint-size="390px,844px">
+
+  <div style="display:flex; flex-direction:column; height:100%; background:#0b1220; color:#f4f7fb">
+
+    <!-- Header -->
+    <div style="display:flex; align-items:center; justify-content:space-between; padding:56px 16px 10px; flex:none">
+      <div style="display:flex; align-items:center; gap:10px">
+        <div style="width:34px; height:34px; border-radius:10px; background:#1e6fd9; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:15px; color:#fff">มือ</div>
+        <div>
+          <div style="font-size:15px; font-weight:700; line-height:1.2">SignMind AI</div>
+          <div style="font-size:11px; color:#8fb8ec; line-height:1.2">สแกนและแปลภาษามือไทย</div>
+        </div>
+      </div>
+      <div style="display:flex; align-items:center; gap:6px; background:rgba(30,111,217,.18); border:1px solid rgba(143,184,236,.35); border-radius:99px; padding:5px 11px">
+        <span style="width:7px; height:7px; border-radius:50%; background:{{ liveDotColor }}; animation:sm-blink 1.4s infinite"></span>
+        <span style="font-size:11.5px; font-weight:600; color:#cfe1f8">{{ liveLabel }}</span>
+      </div>
+    </div>
+
+    <!-- Camera viewport -->
+    <div style="position:relative; flex:none; height:392px; margin:0 12px; border-radius:20px; overflow:hidden; background:linear-gradient(160deg,#17222f 0%,#101a26 55%,#0c141e 100%); border:1px solid rgba(143,184,236,.18)">
+
+      <!-- placeholder camera feed texture -->
+      <div style="position:absolute; inset:0; background-image:repeating-linear-gradient(45deg, rgba(143,184,236,.045) 0 10px, transparent 10px 22px)"></div>
+      <div style="position:absolute; top:10px; left:0; right:0; text-align:center; font-family:ui-monospace,Menlo,monospace; font-size:10px; letter-spacing:.08em; color:rgba(143,184,236,.5)">CAMERA FEED · กล้องหลัง 720p</div>
+
+      <!-- corner scan frame -->
+      <div style="position:absolute; inset:26px 26px 30px; pointer-events:none">
+        <div style="position:absolute; top:0; left:0; width:26px; height:26px; border-top:2.5px solid #6ea8ee; border-left:2.5px solid #6ea8ee; border-top-left-radius:8px"></div>
+        <div style="position:absolute; top:0; right:0; width:26px; height:26px; border-top:2.5px solid #6ea8ee; border-right:2.5px solid #6ea8ee; border-top-right-radius:8px"></div>
+        <div style="position:absolute; bottom:0; left:0; width:26px; height:26px; border-bottom:2.5px solid #6ea8ee; border-left:2.5px solid #6ea8ee; border-bottom-left-radius:8px"></div>
+        <div style="position:absolute; bottom:0; right:0; width:26px; height:26px; border-bottom:2.5px solid #6ea8ee; border-right:2.5px solid #6ea8ee; border-bottom-right-radius:8px"></div>
+      </div>
+
+      <!-- MediaPipe hand skeleton (21 landmarks) -->
+      <div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center">{{ handSkeleton }}</div>
+
+      <!-- scanline -->
+      {{ scanLine }}
+
+      <!-- FPS / latency chips -->
+      <div style="position:absolute; left:12px; bottom:12px; display:flex; gap:6px">
+        <div style="background:rgba(11,18,32,.78); border:1px solid rgba(143,184,236,.25); border-radius:8px; padding:4px 9px; font-family:ui-monospace,Menlo,monospace; font-size:10px; color:#8fb8ec">{{ fpsLabel }}</div>
+        <div style="background:rgba(11,18,32,.78); border:1px solid rgba(143,184,236,.25); border-radius:8px; padding:4px 9px; font-family:ui-monospace,Menlo,monospace; font-size:10px; color:#8fb8ec">หน่วง {{ latencyLabel }}</div>
+      </div>
+
+      <!-- confidence chip -->
+      <div style="position:absolute; right:12px; bottom:12px; background:rgba(11,18,32,.78); border:1px solid rgba(143,184,236,.25); border-radius:8px; padding:4px 9px; font-size:11px; font-weight:600; white-space:nowrap; color:{{ confColor }}">ความเชื่อมั่น {{ confLabel }}</div>
+
+      <!-- pause/play overlay button -->
+      <button onClick="{{ toggleScan }}" style="position:absolute; top:10px; right:10px; width:38px; height:38px; border-radius:50%; border:1px solid rgba(143,184,236,.35); background:rgba(11,18,32,.72); color:#e7f0fc; font-size:13px; cursor:pointer; display:flex; align-items:center; justify-content:center">{{ scanBtnIcon }}</button>
+    </div>
+
+    <!-- Translation result sheet -->
+    <div style="flex:1; display:flex; flex-direction:column; margin:12px 12px 8px; background:#f4f7fb; border-radius:20px; padding:14px 16px 12px; color:#0f2f5c; min-height:0">
+      <div style="display:flex; align-items:baseline; justify-content:space-between">
+        <div style="font-size:11.5px; font-weight:600; color:#5a7aa6; letter-spacing:.02em">ผลการแปล</div>
+        <button onClick="{{ clearSentence }}" style="border:none; background:none; color:#1e6fd9; font-family:inherit; font-size:12px; font-weight:600; cursor:pointer; padding:2px 4px">ล้างข้อความ</button>
+      </div>
+
+      <!-- current detected word -->
+      <div style="display:flex; align-items:center; gap:12px; margin-top:2px">
+        <div style="font-size:34px; font-weight:700; line-height:1.15; color:#0f2f5c; min-height:44px">{{ currentWord }}</div>
+      </div>
+
+      <!-- confidence bar -->
+      <div style="display:flex; align-items:center; gap:8px; margin-top:2px">
+        <div style="flex:1; height:6px; border-radius:99px; background:#dbe5f2; overflow:hidden">
+          <div style="height:100%; border-radius:99px; background:{{ confColor }}; width:{{ confWidth }}; transition:width .5s ease"></div>
+        </div>
+        <div style="font-family:ui-monospace,Menlo,monospace; font-size:11px; color:#5a7aa6; width:44px; text-align:right">{{ confLabel }}</div>
+      </div>
+
+      <!-- assembled sentence -->
+      <div style="margin-top:10px; background:#fff; border:1px solid #dbe5f2; border-radius:12px; padding:10px 12px; min-height:44px; font-size:16px; font-weight:500; color:#22456e; line-height:1.5">{{ sentenceDisplay }}</div>
+
+      <!-- actions -->
+      <div style="display:flex; gap:10px; margin-top:12px">
+        <button onClick="{{ speak }}" style="flex:1.4; display:flex; align-items:center; justify-content:center; gap:8px; height:48px; border:none; border-radius:14px; background:{{ speakBg }}; color:#fff; font-family:inherit; font-size:15px; font-weight:700; cursor:pointer" style-active="transform:scale(.98)">
+          <span style="font-size:16px">{{ speakIcon }}</span>{{ speakLabel }}
+        </button>
+        <button onClick="{{ noop }}" style="flex:1; display:flex; align-items:center; justify-content:center; gap:7px; height:48px; border:1.5px solid #1e6fd9; border-radius:14px; background:#fff; color:#1e6fd9; font-family:inherit; font-size:14px; font-weight:700; cursor:pointer" style-active="transform:scale(.98)">โหมดสนทนา AI</button>
+      </div>
+    </div>
+
+    <!-- Tab bar -->
+    <div style="flex:none; display:flex; justify-content:space-around; align-items:center; padding:6px 10px 26px; border-top:1px solid rgba(143,184,236,.14)">
+      <sc-for list="{{ tabs }}" as="tab" hint-placeholder-count="4">
+        <div style="display:flex; flex-direction:column; align-items:center; gap:3px; min-width:64px; min-height:44px; justify-content:center; cursor:pointer">
+          <div style="width:22px; height:22px; border-radius:6px; background:{{ tab.iconBg }}; display:flex; align-items:center; justify-content:center; font-size:11px; color:{{ tab.iconFg }}; font-weight:700">{{ tab.glyph }}</div>
+          <div style="font-size:10px; font-weight:600; color:{{ tab.labelColor }}">{{ tab.label }}</div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+</x-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;: {&quot;width&quot;: 470, &quot;height&quot;: 940}, &quot;accentColor&quot;: {&quot;editor&quot;: &quot;color&quot;, &quot;default&quot;: &quot;#1e6fd9&quot;, &quot;options&quot;: [&quot;#1e6fd9&quot;, &quot;#1fa971&quot;, &quot;#7c4dcc&quot;], &quot;tsType&quot;: &quot;string&quot;, &quot;section&quot;: &quot;รูปแบบ&quot;}, &quot;showLandmarkIds&quot;: {&quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: false, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;รูปแบบ&quot;}}">
+class Component extends DCLogic {
+  state = { scanning: true, wordIdx: 0, phase: 0, sentence: [], speaking: false, fps: 24 };
+
+  DEMO = [
+    { word: 'สวัสดี', conf: 0.94 },
+    { word: 'ขอบคุณ', conf: 0.91 },
+    { word: 'ช่วยเหลือ', conf: 0.87 },
+    { word: 'โรงพยาบาล', conf: 0.82 },
+    { word: 'เท่าไหร่', conf: 0.89 },
+  ];
+
+  // 21 MediaPipe hand landmarks (approx. open-hand pose), viewBox 200x220
+  LM = [
+    [100,205],                                   // 0 wrist
+    [72,182],[52,160],[40,140],[32,122],         // thumb 1-4
+    [78,132],[74,102],[72,82],[70,64],           // index 5-8
+    [100,127],[100,92],[100,70],[100,50],        // middle 9-12
+    [122,132],[126,100],[128,78],[130,60],       // ring 13-16
+    [142,144],[152,120],[158,102],[162,88],      // pinky 17-20
+  ];
+  CONN = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+
+  componentDidMount() {
+    this.timer = setInterval(() => {
+      if (!this.state.scanning) return;
+      this.setState(s => {
+        const phase = (s.phase + 1) % 3; // 0=detecting,1=detected,2=hold
+        let { wordIdx, sentence, fps } = s;
+        if (phase === 1) {
+          const w = this.DEMO[wordIdx].word;
+          sentence = sentence.length && sentence[sentence.length-1] === w ? sentence : [...sentence, w].slice(-6);
+        }
+        if (phase === 0) wordIdx = (wordIdx + 1) % this.DEMO.length;
+        fps = 22 + Math.floor(Math.random() * 6);
+        return { phase, wordIdx, sentence, fps };
+      });
+    }, 1300);
+  }
+  componentWillUnmount() { clearInterval(this.timer); if (window.speechSynthesis) speechSynthesis.cancel(); }
+
+  buildSkeleton(detected, accent, showNums) {
+    const e = React.createElement;
+    const jitter = detected ? 0 : 1.5;
+    const pts = this.LM.map(([x,y],i) => [x + (i%2 ? jitter : -jitter), y]);
+    return e('svg', { key:'sk', viewBox:'0 0 200 220', style:{ width:230, height:253, filter:'drop-shadow(0 0 8px rgba(110,168,238,.45))', animation:'sm-pulse 2.6s ease-in-out infinite' } },
+      this.CONN.map(([a,b],i) => e('line', { key:'l'+i, x1:pts[a][0], y1:pts[a][1], x2:pts[b][0], y2:pts[b][1], stroke: detected ? accent : '#6ea8ee', strokeWidth:2.4, strokeLinecap:'round', opacity:.85 })),
+      pts.map(([x,y],i) => e('circle', { key:'c'+i, cx:x, cy:y, r: i===0 ? 5 : 3.6, fill:'#fff', stroke: detected ? accent : '#1e6fd9', strokeWidth:2.2 })),
+      showNums ? pts.map(([x,y],i) => e('text', { key:'t'+i, x:x+7, y:y-6, fontSize:8.5, fill:'#8fb8ec', fontFamily:'ui-monospace,monospace' }, String(i))) : null
+    );
+  }
+
+  renderVals() {
+    const accent = this.props.accentColor ?? '#1e6fd9';
+    const showNums = this.props.showLandmarkIds ?? false;
+    const e = React.createElement;
+    const { scanning, wordIdx, phase, sentence, speaking, fps } = this.state;
+    const demo = this.DEMO[wordIdx];
+    const detecting = scanning && phase === 0;
+    const detected = scanning && !detecting;
+    const conf = detected ? demo.conf : 0;
+    const okColor = conf >= 0.85 ? '#1fa971' : '#e09b2d';
+
+    return {
+      liveLabel: scanning ? (detecting ? 'กำลังตรวจจับ…' : 'ตรวจพบท่าทาง') : 'หยุดชั่วคราว',
+      liveDotColor: scanning ? '#35d491' : '#98a8bd',
+      scanBtnIcon: scanning ? '❚❚' : '▶',
+      toggleScan: () => this.setState(s => ({ scanning: !s.scanning })),
+      handSkeleton: this.buildSkeleton(detected, detected ? okColor : accent, showNums),
+      scanLine: scanning ? e('div', { style:{ position:'absolute', left:26, right:26, top:40, height:2, borderRadius:2, background:'linear-gradient(90deg,transparent,#6ea8ee,transparent)', animation:'sm-scanline 2.6s linear infinite' } }) : null,
+      fpsLabel: scanning ? fps + ' FPS' : '— FPS',
+      latencyLabel: scanning ? '1.1 วิ' : '—',
+      confLabel: detected ? Math.round(conf*100) + '%' : '—',
+      confColor: detected ? okColor : '#98a8bd',
+      confWidth: detected ? Math.round(conf*100) + '%' : '0%',
+      currentWord: detected ? demo.word : (scanning ? '…' : ''),
+      sentenceDisplay: sentence.length ? sentence.join(' ') : e('span', { style:{ color:'#9db2cd', fontWeight:400, fontSize:13.5 } }, 'คำที่แปลได้จะเรียงเป็นประโยคที่นี่'),
+      clearSentence: () => this.setState({ sentence: [] }),
+      speak: () => {
+        const text = this.state.sentence.join(' ');
+        if (!text || !window.speechSynthesis) return;
+        speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = 'th-TH';
+        u.onend = () => this.setState({ speaking: false });
+        this.setState({ speaking: true });
+        speechSynthesis.speak(u);
+      },
+      speaking,
+      speakBg: speaking ? '#0f2f5c' : accent,
+      speakIcon: speaking ? '◉' : '🔊',
+      speakLabel: speaking ? 'กำลังพูด…' : 'อ่านออกเสียง',
+      noop: () => {},
+      tabs: [
+        { label:'สแกน', glyph:'⌘', iconBg:accent, iconFg:'#fff', labelColor:'#e7f0fc' },
+        { label:'ครูฝึก AI', glyph:'✎', iconBg:'rgba(143,184,236,.14)', iconFg:'#8fb8ec', labelColor:'#8fb8ec' },
+        { label:'สนทนา', glyph:'💬', iconBg:'rgba(143,184,236,.14)', iconFg:'#8fb8ec', labelColor:'#8fb8ec' },
+        { label:'เรียนรู้', glyph:'📖', iconBg:'rgba(143,184,236,.14)', iconFg:'#8fb8ec', labelColor:'#8fb8ec' },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>
