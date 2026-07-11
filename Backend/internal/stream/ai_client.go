@@ -40,3 +40,9 @@ func NewGRPCClient(addr string) (*GRPCClient, error) {
 func (c *GRPCClient) OpenStream(ctx context.Context) (AIStream, error) {
 	return c.client.StreamInference(ctx)
 }
+
+// Raw exposes the generated client for the management RPCs (UploadModel,
+// StreamLogs, tuning) used by the admin API.
+func (c *GRPCClient) Raw() pb.TslInferenceClient {
+	return c.client
+}

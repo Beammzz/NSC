@@ -89,6 +89,18 @@ class TslInferenceServicer(pb_grpc.TslInferenceServicer):
                 context.abort(grpc.StatusCode.FAILED_PRECONDITION, str(exc))
             if result is None:
                 continue
+            logger.debug(
+                "prediction seq=%d word=%r conf=%.4f idle=%s uncertain=%s "
+                "top=%s other=%.4f micros=%d",
+                frame.seq,
+                result.word,
+                result.confidence,
+                result.is_idle,
+                result.is_uncertain,
+                [(label, round(prob, 4)) for label, prob in result.top],
+                result.other_prob,
+                result.inference_micros,
+            )
             yield pb.Prediction(
                 seq=frame.seq,
                 word=result.word,
@@ -100,6 +112,7 @@ class TslInferenceServicer(pb_grpc.TslInferenceServicer):
                     for label, prob in result.top
                 ],
                 inference_micros=result.inference_micros,
+                other_prob=result.other_prob,
             )
         logger.info("Inference stream closed: %s", context.peer())
 
@@ -242,10 +255,19 @@ class TslInferenceServicer(pb_grpc.TslInferenceServicer):
             kwargs["idle_min_frames_with_hands"] = request.idle_min_frames_with_hands
         if request.HasField("idle_motion_std_threshold"):
             kwargs["idle_motion_std_threshold"] = request.idle_motion_std_threshold
+        if request.HasField("debug_mode"):
+            kwargs["debug_mode"] = request.debug_mode
         try:
             self._engine.set_tuning(**kwargs)
         except ValueError as exc:
             context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
+        if request.HasField("debug_mode"):
+            # Dev enables all debug output (per-prediction breakdown lines and
+            # any library DEBUG records reach StreamLogs subscribers).
+            level = logging.DEBUG if request.debug_mode else logging.INFO
+            logging.getLogger().setLevel(level)
+            logger.info("debug_mode=%s -> log level %s",
+                        request.debug_mode, logging.getLevelName(level))
         return self._tuning_state()
 
     def _tuning_state(self) -> "pb.TuningState":
@@ -259,6 +281,7 @@ class TslInferenceServicer(pb_grpc.TslInferenceServicer):
             num_classes=num_classes,
             sequence_len=sequence_len,
             feature_dim=feature_dim,
+            debug_mode=tuning.debug_mode,
         )
 
 

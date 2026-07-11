@@ -19,12 +19,16 @@ import (
 
 type Handler struct {
 	ai       AIClient
+	record   func(*pb.Prediction)
 	upgrader websocket.Upgrader
 }
 
-func NewHandler(ai AIClient) *Handler {
+// NewHandler bridges WS clients to the AI service. record may be nil; when
+// set it is invoked for every prediction (the webui's prediction log).
+func NewHandler(ai AIClient, record func(*pb.Prediction)) *Handler {
 	return &Handler{
-		ai: ai,
+		ai:     ai,
+		record: record,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  8192,
 			WriteBufferSize: 8192,
@@ -92,6 +96,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 				cancel()
 				return
+			}
+			if h.record != nil {
+				h.record(pred)
 			}
 			if !send(newPredictionMessage(pred)) {
 				return

@@ -44,7 +44,7 @@ class LandmarkFrame(_message.Message):
     def __init__(self, seq: _Optional[int] = ..., timestamp_ms: _Optional[int] = ..., features: _Optional[_Iterable[float]] = ..., reset: _Optional[bool] = ...) -> None: ...
 
 class Prediction(_message.Message):
-    __slots__ = ("seq", "word", "confidence", "is_idle", "is_uncertain", "top", "inference_micros")
+    __slots__ = ("seq", "word", "confidence", "is_idle", "is_uncertain", "top", "inference_micros", "other_prob")
     SEQ_FIELD_NUMBER: _ClassVar[int]
     WORD_FIELD_NUMBER: _ClassVar[int]
     CONFIDENCE_FIELD_NUMBER: _ClassVar[int]
@@ -52,6 +52,7 @@ class Prediction(_message.Message):
     IS_UNCERTAIN_FIELD_NUMBER: _ClassVar[int]
     TOP_FIELD_NUMBER: _ClassVar[int]
     INFERENCE_MICROS_FIELD_NUMBER: _ClassVar[int]
+    OTHER_PROB_FIELD_NUMBER: _ClassVar[int]
     seq: int
     word: str
     confidence: float
@@ -59,7 +60,8 @@ class Prediction(_message.Message):
     is_uncertain: bool
     top: _containers.RepeatedCompositeFieldContainer[ClassProb]
     inference_micros: int
-    def __init__(self, seq: _Optional[int] = ..., word: _Optional[str] = ..., confidence: _Optional[float] = ..., is_idle: _Optional[bool] = ..., is_uncertain: _Optional[bool] = ..., top: _Optional[_Iterable[_Union[ClassProb, _Mapping]]] = ..., inference_micros: _Optional[int] = ...) -> None: ...
+    other_prob: float
+    def __init__(self, seq: _Optional[int] = ..., word: _Optional[str] = ..., confidence: _Optional[float] = ..., is_idle: _Optional[bool] = ..., is_uncertain: _Optional[bool] = ..., top: _Optional[_Iterable[_Union[ClassProb, _Mapping]]] = ..., inference_micros: _Optional[int] = ..., other_prob: _Optional[float] = ...) -> None: ...
 
 class ClassProb(_message.Message):
     __slots__ = ("label", "prob")
@@ -124,17 +126,19 @@ class GetTuningRequest(_message.Message):
     def __init__(self) -> None: ...
 
 class SetTuningRequest(_message.Message):
-    __slots__ = ("confidence_threshold", "idle_min_frames_with_hands", "idle_motion_std_threshold")
+    __slots__ = ("confidence_threshold", "idle_min_frames_with_hands", "idle_motion_std_threshold", "debug_mode")
     CONFIDENCE_THRESHOLD_FIELD_NUMBER: _ClassVar[int]
     IDLE_MIN_FRAMES_WITH_HANDS_FIELD_NUMBER: _ClassVar[int]
     IDLE_MOTION_STD_THRESHOLD_FIELD_NUMBER: _ClassVar[int]
+    DEBUG_MODE_FIELD_NUMBER: _ClassVar[int]
     confidence_threshold: float
     idle_min_frames_with_hands: int
     idle_motion_std_threshold: float
-    def __init__(self, confidence_threshold: _Optional[float] = ..., idle_min_frames_with_hands: _Optional[int] = ..., idle_motion_std_threshold: _Optional[float] = ...) -> None: ...
+    debug_mode: bool
+    def __init__(self, confidence_threshold: _Optional[float] = ..., idle_min_frames_with_hands: _Optional[int] = ..., idle_motion_std_threshold: _Optional[float] = ..., debug_mode: _Optional[bool] = ...) -> None: ...
 
 class TuningState(_message.Message):
-    __slots__ = ("confidence_threshold", "idle_min_frames_with_hands", "idle_motion_std_threshold", "model_loaded", "num_classes", "sequence_len", "feature_dim")
+    __slots__ = ("confidence_threshold", "idle_min_frames_with_hands", "idle_motion_std_threshold", "model_loaded", "num_classes", "sequence_len", "feature_dim", "debug_mode")
     CONFIDENCE_THRESHOLD_FIELD_NUMBER: _ClassVar[int]
     IDLE_MIN_FRAMES_WITH_HANDS_FIELD_NUMBER: _ClassVar[int]
     IDLE_MOTION_STD_THRESHOLD_FIELD_NUMBER: _ClassVar[int]
@@ -142,6 +146,7 @@ class TuningState(_message.Message):
     NUM_CLASSES_FIELD_NUMBER: _ClassVar[int]
     SEQUENCE_LEN_FIELD_NUMBER: _ClassVar[int]
     FEATURE_DIM_FIELD_NUMBER: _ClassVar[int]
+    DEBUG_MODE_FIELD_NUMBER: _ClassVar[int]
     confidence_threshold: float
     idle_min_frames_with_hands: int
     idle_motion_std_threshold: float
@@ -149,4 +154,5 @@ class TuningState(_message.Message):
     num_classes: int
     sequence_len: int
     feature_dim: int
-    def __init__(self, confidence_threshold: _Optional[float] = ..., idle_min_frames_with_hands: _Optional[int] = ..., idle_motion_std_threshold: _Optional[float] = ..., model_loaded: _Optional[bool] = ..., num_classes: _Optional[int] = ..., sequence_len: _Optional[int] = ..., feature_dim: _Optional[int] = ...) -> None: ...
+    debug_mode: bool
+    def __init__(self, confidence_threshold: _Optional[float] = ..., idle_min_frames_with_hands: _Optional[int] = ..., idle_motion_std_threshold: _Optional[float] = ..., model_loaded: _Optional[bool] = ..., num_classes: _Optional[int] = ..., sequence_len: _Optional[int] = ..., feature_dim: _Optional[int] = ..., debug_mode: _Optional[bool] = ...) -> None: ...

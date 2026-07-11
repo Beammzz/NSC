@@ -32,6 +32,11 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- Deliberately NOT declaring uses-native-library libOpenCL.so:
+             letting TFLite's GPU delegate load OpenCL was measured on the
+             SM-S731B (Xclipse 940) to compile kernels for ~60s on EVERY cold
+             start and run hand inference ~2x slower than the OpenGL fallback
+             it uses when OpenCL is unavailable. -->
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

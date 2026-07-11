@@ -225,12 +225,17 @@ type Prediction struct {
 	IsIdle bool `protobuf:"varint,4,opt,name=is_idle,json=isIdle,proto3" json:"is_idle,omitempty"`
 	// Top-1 below the trained confidence threshold.
 	IsUncertain bool `protobuf:"varint,5,opt,name=is_uncertain,json=isUncertain,proto3" json:"is_uncertain,omitempty"`
-	// Up to 5 entries, descending probability, prob > 0.01.
+	// Up to 5 entries, descending probability, prob > 0.01. When the service
+	// runs with debug_mode on (TuningState), this expands to up to 10 entries
+	// with no probability cutoff, for webui analysis.
 	Top []*ClassProb `protobuf:"bytes,6,rep,name=top,proto3" json:"top,omitempty"`
 	// Inference wall time in microseconds.
 	InferenceMicros int64 `protobuf:"varint,7,opt,name=inference_micros,json=inferenceMicros,proto3" json:"inference_micros,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Probability mass not covered by `top` (the "other" bucket). Only
+	// populated when debug_mode is on; 0 otherwise.
+	OtherProb     float32 `protobuf:"fixed32,8,opt,name=other_prob,json=otherProb,proto3" json:"other_prob,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Prediction) Reset() {
@@ -308,6 +313,13 @@ func (x *Prediction) GetTop() []*ClassProb {
 func (x *Prediction) GetInferenceMicros() int64 {
 	if x != nil {
 		return x.InferenceMicros
+	}
+	return 0
+}
+
+func (x *Prediction) GetOtherProb() float32 {
+	if x != nil {
+		return x.OtherProb
 	}
 	return 0
 }
@@ -752,8 +764,12 @@ type SetTuningRequest struct {
 	IdleMinFramesWithHands *uint32 `protobuf:"varint,2,opt,name=idle_min_frames_with_hands,json=idleMinFramesWithHands,proto3,oneof" json:"idle_min_frames_with_hands,omitempty"`
 	// Idle bypass: mean per-coordinate std-dev below this counts as static.
 	IdleMotionStdThreshold *float32 `protobuf:"fixed32,3,opt,name=idle_motion_std_threshold,json=idleMotionStdThreshold,proto3,oneof" json:"idle_motion_std_threshold,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	// Dev/debug mode: service logs at DEBUG level and Predictions carry the
+	// full probability breakdown (expanded `top` + `other_prob`). Set by the
+	// gateway from its ENV (Dev -> true); runtime-only like the other fields.
+	DebugMode     *bool `protobuf:"varint,4,opt,name=debug_mode,json=debugMode,proto3,oneof" json:"debug_mode,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SetTuningRequest) Reset() {
@@ -807,16 +823,25 @@ func (x *SetTuningRequest) GetIdleMotionStdThreshold() float32 {
 	return 0
 }
 
+func (x *SetTuningRequest) GetDebugMode() bool {
+	if x != nil && x.DebugMode != nil {
+		return *x.DebugMode
+	}
+	return false
+}
+
 type TuningState struct {
 	state                  protoimpl.MessageState `protogen:"open.v1"`
 	ConfidenceThreshold    float32                `protobuf:"fixed32,1,opt,name=confidence_threshold,json=confidenceThreshold,proto3" json:"confidence_threshold,omitempty"`
 	IdleMinFramesWithHands uint32                 `protobuf:"varint,2,opt,name=idle_min_frames_with_hands,json=idleMinFramesWithHands,proto3" json:"idle_min_frames_with_hands,omitempty"`
 	IdleMotionStdThreshold float32                `protobuf:"fixed32,3,opt,name=idle_motion_std_threshold,json=idleMotionStdThreshold,proto3" json:"idle_motion_std_threshold,omitempty"`
 	// Read-only facts about the loaded model, for webui display.
-	ModelLoaded   bool   `protobuf:"varint,4,opt,name=model_loaded,json=modelLoaded,proto3" json:"model_loaded,omitempty"`
-	NumClasses    uint32 `protobuf:"varint,5,opt,name=num_classes,json=numClasses,proto3" json:"num_classes,omitempty"`
-	SequenceLen   uint32 `protobuf:"varint,6,opt,name=sequence_len,json=sequenceLen,proto3" json:"sequence_len,omitempty"`
-	FeatureDim    uint32 `protobuf:"varint,7,opt,name=feature_dim,json=featureDim,proto3" json:"feature_dim,omitempty"`
+	ModelLoaded bool   `protobuf:"varint,4,opt,name=model_loaded,json=modelLoaded,proto3" json:"model_loaded,omitempty"`
+	NumClasses  uint32 `protobuf:"varint,5,opt,name=num_classes,json=numClasses,proto3" json:"num_classes,omitempty"`
+	SequenceLen uint32 `protobuf:"varint,6,opt,name=sequence_len,json=sequenceLen,proto3" json:"sequence_len,omitempty"`
+	FeatureDim  uint32 `protobuf:"varint,7,opt,name=feature_dim,json=featureDim,proto3" json:"feature_dim,omitempty"`
+	// Current debug/Dev mode (see SetTuningRequest.debug_mode).
+	DebugMode     bool `protobuf:"varint,8,opt,name=debug_mode,json=debugMode,proto3" json:"debug_mode,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -900,6 +925,13 @@ func (x *TuningState) GetFeatureDim() uint32 {
 	return 0
 }
 
+func (x *TuningState) GetDebugMode() bool {
+	if x != nil {
+		return x.DebugMode
+	}
+	return false
+}
+
 var File_tsl_inference_proto protoreflect.FileDescriptor
 
 const file_tsl_inference_proto_rawDesc = "" +
@@ -909,7 +941,7 @@ const file_tsl_inference_proto_rawDesc = "" +
 	"\x03seq\x18\x01 \x01(\x04R\x03seq\x12!\n" +
 	"\ftimestamp_ms\x18\x02 \x01(\x03R\vtimestampMs\x12\x1a\n" +
 	"\bfeatures\x18\x03 \x03(\x02R\bfeatures\x12\x14\n" +
-	"\x05reset\x18\x04 \x01(\bR\x05reset\"\xed\x01\n" +
+	"\x05reset\x18\x04 \x01(\bR\x05reset\"\x8c\x02\n" +
 	"\n" +
 	"Prediction\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\x04R\x03seq\x12\x12\n" +
@@ -920,7 +952,9 @@ const file_tsl_inference_proto_rawDesc = "" +
 	"\ais_idle\x18\x04 \x01(\bR\x06isIdle\x12!\n" +
 	"\fis_uncertain\x18\x05 \x01(\bR\visUncertain\x122\n" +
 	"\x03top\x18\x06 \x03(\v2 .signmind.inference.v1.ClassProbR\x03top\x12)\n" +
-	"\x10inference_micros\x18\a \x01(\x03R\x0finferenceMicros\"5\n" +
+	"\x10inference_micros\x18\a \x01(\x03R\x0finferenceMicros\x12\x1d\n" +
+	"\n" +
+	"other_prob\x18\b \x01(\x02R\totherProb\"5\n" +
 	"\tClassProb\x12\x14\n" +
 	"\x05label\x18\x01 \x01(\tR\x05label\x12\x12\n" +
 	"\x04prob\x18\x02 \x01(\x02R\x04prob\"|\n" +
@@ -949,14 +983,17 @@ const file_tsl_inference_proto_rawDesc = "" +
 	"\x05level\x18\x02 \x01(\x0e2\x1f.signmind.inference.v1.LogLevelR\x05level\x12\x16\n" +
 	"\x06logger\x18\x03 \x01(\tR\x06logger\x12\x18\n" +
 	"\amessage\x18\x04 \x01(\tR\amessage\"\x12\n" +
-	"\x10GetTuningRequest\"\xa1\x02\n" +
+	"\x10GetTuningRequest\"\xd4\x02\n" +
 	"\x10SetTuningRequest\x126\n" +
 	"\x14confidence_threshold\x18\x01 \x01(\x02H\x00R\x13confidenceThreshold\x88\x01\x01\x12?\n" +
 	"\x1aidle_min_frames_with_hands\x18\x02 \x01(\rH\x01R\x16idleMinFramesWithHands\x88\x01\x01\x12>\n" +
-	"\x19idle_motion_std_threshold\x18\x03 \x01(\x02H\x02R\x16idleMotionStdThreshold\x88\x01\x01B\x17\n" +
+	"\x19idle_motion_std_threshold\x18\x03 \x01(\x02H\x02R\x16idleMotionStdThreshold\x88\x01\x01\x12\"\n" +
+	"\n" +
+	"debug_mode\x18\x04 \x01(\bH\x03R\tdebugMode\x88\x01\x01B\x17\n" +
 	"\x15_confidence_thresholdB\x1d\n" +
 	"\x1b_idle_min_frames_with_handsB\x1c\n" +
-	"\x1a_idle_motion_std_threshold\"\xbf\x02\n" +
+	"\x1a_idle_motion_std_thresholdB\r\n" +
+	"\v_debug_mode\"\xde\x02\n" +
 	"\vTuningState\x121\n" +
 	"\x14confidence_threshold\x18\x01 \x01(\x02R\x13confidenceThreshold\x12:\n" +
 	"\x1aidle_min_frames_with_hands\x18\x02 \x01(\rR\x16idleMinFramesWithHands\x129\n" +
@@ -966,7 +1003,9 @@ const file_tsl_inference_proto_rawDesc = "" +
 	"numClasses\x12!\n" +
 	"\fsequence_len\x18\x06 \x01(\rR\vsequenceLen\x12\x1f\n" +
 	"\vfeature_dim\x18\a \x01(\rR\n" +
-	"featureDim*{\n" +
+	"featureDim\x12\x1d\n" +
+	"\n" +
+	"debug_mode\x18\b \x01(\bR\tdebugMode*{\n" +
 	"\bFileKind\x12\x19\n" +
 	"\x15FILE_KIND_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16FILE_KIND_TFLITE_MODEL\x10\x01\x12\x17\n" +

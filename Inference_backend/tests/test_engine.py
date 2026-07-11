@@ -186,3 +186,37 @@ class TestTuning:
         for frame in moving_frames():
             result = session.add_frame(frame)
         assert not result.is_uncertain and result.word == "สวัสดี"
+
+
+class TestDebugMode:
+    def test_debug_off_by_default_and_other_prob_zero(self, artifacts):
+        engine, _ = make_engine(artifacts, [0.6, 0.25, 0.1, 0.01])
+        assert not engine.get_tuning().debug_mode
+        session = engine.session()
+        result = None
+        for frame in moving_frames():
+            result = session.add_frame(frame)
+        assert len(result.top) == 3  # 0.01 filtered by TOP_MIN_PROB
+        assert result.other_prob == 0.0
+
+    def test_debug_mode_expands_top_and_fills_other_prob(self, artifacts):
+        engine, _ = make_engine(artifacts, [0.6, 0.25, 0.1, 0.01])
+        engine.set_tuning(debug_mode=True)
+        session = engine.session()
+        result = None
+        for frame in moving_frames():
+            result = session.add_frame(frame)
+        # No probability cutoff: every class appears (capped at DEBUG_TOP_K).
+        assert len(result.top) == NUM_CLASSES
+        assert result.top[-1][1] == pytest.approx(0.01, abs=1e-4)
+        assert result.other_prob == pytest.approx(
+            1.0 - sum(p for _, p in result.top), abs=1e-6
+        )
+
+    def test_debug_mode_partial_update_keeps_other_tuning(self, artifacts):
+        engine, _ = make_engine(artifacts, [0.25] * NUM_CLASSES)
+        before = engine.get_tuning()
+        after = engine.set_tuning(debug_mode=True)
+        assert after.debug_mode
+        assert after.confidence_threshold == before.confidence_threshold
+        assert after.idle_min_frames_with_hands == before.idle_min_frames_with_hands

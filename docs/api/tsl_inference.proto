@@ -61,10 +61,15 @@ message Prediction {
   bool is_idle = 4;
   // Top-1 below the trained confidence threshold.
   bool is_uncertain = 5;
-  // Up to 5 entries, descending probability, prob > 0.01.
+  // Up to 5 entries, descending probability, prob > 0.01. When the service
+  // runs with debug_mode on (TuningState), this expands to up to 10 entries
+  // with no probability cutoff, for webui analysis.
   repeated ClassProb top = 6;
   // Inference wall time in microseconds.
   int64 inference_micros = 7;
+  // Probability mass not covered by `top` (the "other" bucket). Only
+  // populated when debug_mode is on; 0 otherwise.
+  float other_prob = 8;
 }
 
 message ClassProb {
@@ -151,6 +156,10 @@ message SetTuningRequest {
   optional uint32 idle_min_frames_with_hands = 2;
   // Idle bypass: mean per-coordinate std-dev below this counts as static.
   optional float idle_motion_std_threshold = 3;
+  // Dev/debug mode: service logs at DEBUG level and Predictions carry the
+  // full probability breakdown (expanded `top` + `other_prob`). Set by the
+  // gateway from its ENV (Dev -> true); runtime-only like the other fields.
+  optional bool debug_mode = 4;
 }
 
 message TuningState {
@@ -162,4 +171,6 @@ message TuningState {
   uint32 num_classes = 5;
   uint32 sequence_len = 6;
   uint32 feature_dim = 7;
+  // Current debug/Dev mode (see SetTuningRequest.debug_mode).
+  bool debug_mode = 8;
 }

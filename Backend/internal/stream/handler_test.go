@@ -67,7 +67,7 @@ func (f *fakeAIClient) OpenStream(ctx context.Context) (AIStream, error) {
 
 func dialTestServer(t *testing.T, ai AIClient) (*websocket.Conn, func()) {
 	t.Helper()
-	srv := httptest.NewServer(NewHandler(ai))
+	srv := httptest.NewServer(NewHandler(ai, nil))
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
@@ -220,8 +220,33 @@ func TestUnsupportedSchemaVersionCloses(t *testing.T) {
 	}
 }
 
+func TestPredictionsReachRecorder(t *testing.T) {
+	aiStream := newFakeAIStream()
+	recorded := make(chan *pb.Prediction, 1)
+	srv := httptest.NewServer(NewHandler(&fakeAIClient{stream: aiStream},
+		func(p *pb.Prediction) { recorded <- p }))
+	defer srv.Close()
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dialing test server: %v", err)
+	}
+	defer conn.Close()
+	readServerMessage(t, conn) // ready
+
+	aiStream.predictions <- &pb.Prediction{Seq: 3, Word: "รัก", Confidence: 0.8}
+	select {
+	case p := <-recorded:
+		if p.GetSeq() != 3 || p.GetWord() != "รัก" {
+			t.Fatalf("recorded prediction mismatch: %v", p)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("prediction never reached the recorder")
+	}
+}
+
 func TestAIUnavailableReturnsProblem(t *testing.T) {
-	srv := httptest.NewServer(NewHandler(&fakeAIClient{openErr: errors.New("ai down")}))
+	srv := httptest.NewServer(NewHandler(&fakeAIClient{openErr: errors.New("ai down")}, nil))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL)

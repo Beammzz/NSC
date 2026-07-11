@@ -20,6 +20,10 @@ Golang REST & WebSocket API server: gateway between the Flutter client and the P
 | `backend/internal/httpapi/` | RFC 7807 Problem Details type and response writer |
 | `backend/internal/stream/` | `/api/v1/stream` WebSocket handler, WS message types (mirrors `docs/api/stream-schema.md`), gRPC AI client (`AIClient`/`AIStream` interfaces + `GRPCClient`) |
 | `backend/internal/pb/` | protoc-generated stubs from `docs/api/tsl_inference.proto` — never edit by hand; regenerate (see Work Guidance) |
+| `backend/internal/admin/` | `/api/v1/admin/*` REST handlers (status, tuning, predictions, model upload, SSE log stream) + `SyncDebugMode` background goroutine |
+| `backend/internal/predlog/` | Pure-Go SQLite (`modernc.org/sqlite`) prediction history store |
+| `backend/internal/webui/` | Embeds and serves the compiled Next.js admin static export (`dist/`) at `/` |
+| `backend/webui/` | Next.js 15 + React 19 static admin web application source code |
 
 ---
 
@@ -27,8 +31,10 @@ Golang REST & WebSocket API server: gateway between the Flutter client and the P
 
 - Go 1.22+; standard `cmd/` + `internal/` layout per the root Repository Layout.
 - Endpoints per root API rules: `/api/v1/stream` (WSS, landmark frames), `/api/v1/conversation` (NLP + server-side gloss keypoint transitions for client avatar rendering).
+- Admin web UI served at `/` and admin API at `/api/v1/admin/*` (status, tuning, paginated predictions, multipart model upload, SSE logs).
 - Landmark frames forward to the Python AI service over gRPC bidirectional streaming only — no HTTP fallback on that path.
 - Stream payloads carry `schema_version`; the schema lives in `docs/api/stream-schema.md` and breaking changes require a version bump there first.
+- Configuration loads optional `Backend/.env` (`ENV=Dev|Prod`); `ENV=Dev` enables full debug output end-to-end, and `admin.SyncDebugMode` propagates `debug_mode` to the Python AI inference service.
 - Auth per root rules: JWT access (15 min) + refresh (30 days), refresh tokens hashed server-side and revocable.
 - Errors follow RFC 7807. Never log sensitive user progress data in plain text.
 

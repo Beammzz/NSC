@@ -33,7 +33,7 @@ Python gRPC TSL inference service: receives landmark-frame streams from the Gola
 - The recovered 150-class `label_map.json` has NO idle class: the idle bypass returns `is_idle=true` with an EMPTY `word` (confidence 0, empty `top`) — clients must key off `is_idle`, never the word.
 - `UploadModel` never overwrites live artifact files (Windows refuses replacing a memory-mapped model): each upload lands in `TSL_Output/uploads/<utc-ts>/` and `TSL_Output/active_model.json` points at the active set. Legacy layout (files directly in `TSL_Output/`) is the fallback when no manifest exists.
 - Uploads are validated (interpreter loads, label map parses and matches class count, feature dim matches preprocess config) before the swap; on failure the previous model stays live.
-- Tuning values (`SetTuning`) are runtime-only; they reset to `preprocess_config.json` values on restart.
+- Tuning values (`SetTuning`) are runtime-only; they reset to `preprocess_config.json` values on restart. `debug_mode` (optional bool in tuning/prediction) expands `top` breakdown to 10 entries and populates `other_prob`.
 - Model input/output shape: `(1, sequence_len, feature_dim)` → `(1, num_classes)`; window length comes from the interpreter, not hard-coded.
 
 ---

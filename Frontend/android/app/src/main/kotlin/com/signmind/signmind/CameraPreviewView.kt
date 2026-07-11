@@ -51,6 +51,24 @@ class CameraPreviewView(
     private var poseLandmarker: PoseLandmarker? = null
     private var lastTimestampMs = 0L
 
+    // Pose feeds only the slow-moving body normalization + torso overlay, so it
+    // runs every POSE_FRAME_STRIDE-th frame; skipped frames reuse the last
+    // result. All three fields are touched only on the analysis thread.
+    private var frameIndex = 0L
+    private var lastPoseResult: PoseLandmarkerResult? = null
+
+    // Extraction is capped at TARGET_FPS to match the ~12fps the model was
+    // trained on (the server windows 30 frames regardless of rate, so faster
+    // capture would shrink the window's time span). Advancing by the interval
+    // (not from "now") keeps the average rate at TARGET_FPS despite the camera
+    // delivering frames on ~33ms boundaries.
+    private var nextDueMs = 0L
+
+    // Analysis frames are all the same size, so the RGBA source bitmap is
+    // allocated once and overwritten per frame (detectForVideo is synchronous,
+    // nothing holds it across frames).
+    private var reusableBitmap: Bitmap? = null
+
     // Drops frames that arrive while the previous one is still being analyzed so
     // the executor queue never backs up (STRATEGY_KEEP_ONLY_LATEST + this guard).
     @Volatile
@@ -114,6 +132,12 @@ class CameraPreviewView(
             image.close()
             return
         }
+        val arrivalMs = SystemClock.elapsedRealtime()
+        if (arrivalMs < nextDueMs) {
+            image.close()
+            return
+        }
+        nextDueMs = maxOf(nextDueMs + FRAME_INTERVAL_MS, arrivalMs)
         analyzing = true
         try {
             ensureLandmarkers()
@@ -129,14 +153,25 @@ class CameraPreviewView(
             val nowMs = SystemClock.elapsedRealtime()
             val ts = if (nowMs > lastTimestampMs) nowMs else lastTimestampMs + 1
             lastTimestampMs = ts
+            // Hand and pose run sequentially on purpose: overlapping them on
+            // separate executors was measured to slow hand inference ~40ms
+            // (shared-image/CPU contention) while pose only costs ~35ms — a
+            // net loss on the target device.
             val handResult = handLandmarker?.detectForVideo(mpImage, ts)
             val t2 = SystemClock.elapsedRealtime()
-            val poseResult = poseLandmarker?.detectForVideo(mpImage, ts)
+            val poseResult = if (frameIndex % POSE_FRAME_STRIDE == 0L) {
+                poseLandmarker?.detectForVideo(mpImage, ts).also { lastPoseResult = it }
+            } else {
+                lastPoseResult
+            }
+            frameIndex++
             val t3 = SystemClock.elapsedRealtime()
             LandmarkStreamHandler.emit(buildFrame(handResult, poseResult))
             Log.d(TAG, "frame ms: bitmap=${t1 - t0} hand=${t2 - t1} pose=${t3 - t2} total=${t3 - t0}")
-        } catch (_: Exception) {
-            // A dropped/garbled frame just skips one overlay update.
+        } catch (e: Exception) {
+            // A dropped/garbled frame just skips one overlay update, but never
+            // silently: a per-frame throw here otherwise looks like a dead feed.
+            Log.e(TAG, "analyze failed", e)
         } finally {
             analyzing = false
             image.close()
@@ -148,6 +183,9 @@ class CameraPreviewView(
         // Both models default to CPU, which caps two-model throughput at ~6fps on
         // this device; run them on the GPU delegate and fall back to CPU only if
         // GPU init throws (unsupported driver / emulator).
+        // Hand stays on the GPU: the CPU/XNNPACK path was measured erratic
+        // (45-190ms) on the target device — it contends with the Flutter UI
+        // and the rest of the app — while GPU holds a steadier 30-90ms.
         if (handLandmarker == null) {
             handLandmarker = try {
                 buildHandLandmarker(Delegate.GPU)
@@ -240,7 +278,9 @@ class CameraPreviewView(
      * so MediaPipe sees the image the same way up as the user.
      */
     private fun ImageProxy.toUprightBitmap(): Bitmap {
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val bitmap = reusableBitmap?.takeIf { it.width == width && it.height == height }
+            ?: Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                .also { reusableBitmap = it }
         bitmap.copyPixelsFromBuffer(planes[0].buffer)
         val rotation = imageInfo.rotationDegrees
         if (rotation == 0) return bitmap
@@ -271,5 +311,8 @@ class CameraPreviewView(
         private const val TAG = "SignMindCamera"
         private const val HAND_MODEL = "hand_landmarker.task"
         private const val POSE_MODEL = "pose_landmarker_full.task"
+        private const val POSE_FRAME_STRIDE = 2
+        private const val TARGET_FPS = 12
+        private const val FRAME_INTERVAL_MS = 1000L / TARGET_FPS
     }
 }

@@ -45,6 +45,9 @@ IDLE_LABEL_EN = "idle"
 
 TOP_K = 5
 TOP_MIN_PROB = 0.01
+# debug_mode (Dev): expanded breakdown for webui analysis — more entries, no
+# probability cutoff, plus the leftover mass in PredictionResult.other_prob.
+DEBUG_TOP_K = 10
 
 
 def default_interpreter_factory(model_path: str):
@@ -77,6 +80,10 @@ class Tuning:
     confidence_threshold: float
     idle_min_frames_with_hands: int = DEFAULT_IDLE_MIN_FRAMES_WITH_HANDS
     idle_motion_std_threshold: float = DEFAULT_IDLE_MOTION_STD_THRESHOLD
+    # Dev/debug: predictions carry the full probability breakdown
+    # (DEBUG_TOP_K entries, no cutoff, other_prob filled). Set by the gateway
+    # from its ENV via SetTuning.
+    debug_mode: bool = False
 
 
 @dataclass
@@ -87,6 +94,7 @@ class PredictionResult:
     is_uncertain: bool
     top: list[tuple[str, float]] = field(default_factory=list)
     inference_micros: int = 0  # 0 when the idle bypass skipped the model
+    other_prob: float = 0.0  # mass outside `top`; only filled in debug_mode
 
 
 class _LoadedModel:
@@ -281,6 +289,7 @@ class InferenceEngine:
                 self.tuning.confidence_threshold,
                 self.tuning.idle_min_frames_with_hands,
                 self.tuning.idle_motion_std_threshold,
+                self.tuning.debug_mode,
             )
 
     def set_tuning(
@@ -288,6 +297,7 @@ class InferenceEngine:
         confidence_threshold: float | None = None,
         idle_min_frames_with_hands: int | None = None,
         idle_motion_std_threshold: float | None = None,
+        debug_mode: bool | None = None,
     ) -> Tuning:
         """Apply only the given fields; validates before mutating anything."""
         if confidence_threshold is not None and not (
@@ -313,6 +323,8 @@ class InferenceEngine:
                 self.tuning.idle_min_frames_with_hands = idle_min_frames_with_hands
             if idle_motion_std_threshold is not None:
                 self.tuning.idle_motion_std_threshold = idle_motion_std_threshold
+            if debug_mode is not None:
+                self.tuning.debug_mode = debug_mode
         logger.info("Tuning updated: %s", self.tuning)
         return self.get_tuning()
 
@@ -389,11 +401,19 @@ class InferenceEngine:
             top_prob = float(res.max())
             is_uncertain = top_prob < tuning.confidence_threshold
             sorted_indices = np.argsort(res)[::-1]
-            top = [
-                (model.idx_to_label.get(int(i), f"Label {int(i)}"), float(res[i]))
-                for i in sorted_indices[:TOP_K]
-                if float(res[i]) > TOP_MIN_PROB
-            ]
+            other_prob = 0.0
+            if tuning.debug_mode:
+                top = [
+                    (model.idx_to_label.get(int(i), f"Label {int(i)}"), float(res[i]))
+                    for i in sorted_indices[:DEBUG_TOP_K]
+                ]
+                other_prob = max(0.0, 1.0 - sum(prob for _, prob in top))
+            else:
+                top = [
+                    (model.idx_to_label.get(int(i), f"Label {int(i)}"), float(res[i]))
+                    for i in sorted_indices[:TOP_K]
+                    if float(res[i]) > TOP_MIN_PROB
+                ]
             word = (
                 ""
                 if is_uncertain
@@ -408,6 +428,7 @@ class InferenceEngine:
                 is_uncertain=is_uncertain,
                 top=top,
                 inference_micros=inference_micros,
+                other_prob=other_prob,
             )
 
 

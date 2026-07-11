@@ -39,6 +39,7 @@ def stack(tmp_path):
     broadcaster = logstream.LogBroadcaster()
     broadcaster.setFormatter(logging.Formatter("%(message)s"))
     root = logging.getLogger()
+    original_level = root.level  # SetTuning(debug_mode=...) mutates it
     root.addHandler(broadcaster)
     grpc_server, port = server.build_server(engine, broadcaster, "localhost:0")
     grpc_server.start()
@@ -49,6 +50,7 @@ def stack(tmp_path):
         channel.close()
         grpc_server.stop(grace=None)
         root.removeHandler(broadcaster)
+        root.setLevel(original_level)
 
 
 class TestStreamInference:
@@ -226,6 +228,22 @@ class TestTuning:
         with pytest.raises(grpc.RpcError) as excinfo:
             stub.SetTuning(pb.SetTuningRequest(confidence_threshold=2.0))
         assert excinfo.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+    def test_debug_mode_roundtrip_and_detailed_predictions(self, stack):
+        stub, engine, _ = stack
+        assert not stub.GetTuning(pb.GetTuningRequest()).debug_mode
+        state = stub.SetTuning(pb.SetTuningRequest(debug_mode=True))
+        assert state.debug_mode
+        assert logging.getLogger().level == logging.DEBUG
+        predictions = list(stub.StreamInference(wire_frames(30)))
+        p = predictions[0]
+        assert len(p.top) == NUM_CLASSES  # expanded: no probability cutoff
+        assert p.other_prob == pytest.approx(
+            1.0 - sum(c.prob for c in p.top), abs=1e-5
+        )
+        state = stub.SetTuning(pb.SetTuningRequest(debug_mode=False))
+        assert not state.debug_mode
+        assert logging.getLogger().level == logging.INFO
 
 
 class TestLogBroadcaster:
