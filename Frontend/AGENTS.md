@@ -15,9 +15,10 @@ Flutter mobile client (Android 9+ / iOS 13+): real-time TSL scanner, AI sign-lan
 | Path | Owns |
 |---|---|
 | `frontend/lib/core/` | Core theme (`app_theme.dart`), router (`app_router.dart`), and shared shell (`main_scaffold.dart`) |
-| `frontend/lib/features/<name>/` | One folder per feature (`scanner`, `settings`, `ai_tutor`, `conversation`, `learn`) with `presentation/`, `domain/`, `data/` layers |
+| `frontend/lib/features/<name>/` | One folder per feature (`auth`, `landing`, `scanner`, `settings`, `ai_tutor`, `conversation`, `learn`) with `presentation/`, `domain/`, `data/` layers |
+| `frontend/lib/features/auth/` | Authentication feature (`authProvider`, `LoginScreen`) supporting live JWT login/signup or offline simulated demo mode. Contains embedded Server IP configuration card (`serverUrl`). |
 | `frontend/lib/features/scanner/data/services/tsl_stream_service.dart` | `TslStreamService` interface + `SimulatedTslStreamService` (demo loop) + `WebSocketTslStreamService` (real client for `<serverUrl>/api/v1/stream` per `docs/api/stream-schema.md`); provider picks one from the settings `useSimulatedStream` / `serverUrl` fields |
-| `frontend/lib/features/settings/` | App settings incl. `serverUrl` and demo-mode toggle; persisted via `shared_preferences` behind `sharedPreferencesProvider` (overridden in `main()` and in tests) |
+| `frontend/lib/features/settings/` | App settings view displaying connected Server IP and demo-mode status; persisted via `shared_preferences` behind `sharedPreferencesProvider` (overridden in `main()` and in tests) |
 | `frontend/pubspec.yaml` | Dependencies (including `google_fonts` / Kanit typography) and app metadata |
 | `frontend/test/` | Automated unit and widget tests per feature and core module |
 
@@ -27,9 +28,12 @@ Flutter mobile client (Android 9+ / iOS 13+): real-time TSL scanner, AI sign-lan
 
 - State management: Riverpod only. Navigation: GoRouter only. (Root rules — non-negotiable.)
 - Naming: `snake_case` files, `PascalCase` classes, `camelCase` variables.
+- Entrypoint & Authentication Flow: The application initializes at `/login` (`LoginScreen`). `GoRouter.redirect` verifies `authProvider.isAuthenticated`; unauthenticated users or users who disconnect/logout are automatically returned to `/login`.
+- Server IP Configuration: Configured directly on the Login Page (`LoginScreen`) before authenticating or entering demo mode. Settings Page displays the active server IP read-only with a shortcut back to `/login` to switch servers.
 - Real-time recognition streams feature vectors over WebSocket to `/api/v1/stream`; vector layout follows the root **Feature Vector Spec** — do not restate dimensions in frontend code comments, reference the spec.
 - Conversational AI and Speech Recognition use REST/WebSocket per root API rules.
 - Every new feature ships with a corresponding test file (root Test Creation Mandate).
+- **Feature Introduction Registry Sync Rule**: After authentication or entering demo mode, the application routes to `/landing` (`LandingScreen`) which introduces all implemented SignMind AI features with interactive launch cards. Whenever a new feature is added or an existing feature is removed, developers MUST update `Frontend/lib/features/landing/presentation/screens/landing_screen.dart` alongside DOX (`AGENTS.md`) so the Landing Page remains synchronized as the single source of truth for implemented capabilities.
 
 ---
 

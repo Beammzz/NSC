@@ -2,20 +2,31 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"encoding/hex"
+	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/admin"
+	"gitea.harumi.dev/Harumi/NSC/backend/internal/auth"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/config"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/conversation"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/pb"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/predlog"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/stream"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/webui"
+
+	_ "modernc.org/sqlite"
 )
 
-const debugSyncInterval = 30 * time.Second
+const (
+	debugSyncInterval  = 30 * time.Second
+	tokenPurgeInterval = 1 * time.Hour
+)
 
 func main() {
 	cfg := config.Load()
@@ -24,12 +35,37 @@ func main() {
 		log.SetFlags(log.LstdFlags | log.Lmicroseconds | log.Lshortfile)
 	}
 
-	store, err := predlog.Open(cfg.DBPath)
+	// ---- shared SQLite database ----
+	db, err := openDB(cfg.DBPath)
+	if err != nil {
+		log.Fatalf("opening database: %v", err)
+	}
+	defer db.Close()
+
+	store, err := predlog.OpenWith(db)
 	if err != nil {
 		log.Fatalf("opening prediction log: %v", err)
 	}
-	defer store.Close()
 
+	// ---- auth ----
+	authStore, err := auth.OpenStore(db)
+	if err != nil {
+		log.Fatalf("opening auth store: %v", err)
+	}
+
+	jwtSecret := resolveJWTSecret(cfg)
+	seedAdmin(authStore, cfg)
+
+	loginRL := auth.NewRateLimiter(5, time.Minute)
+	signupRL := auth.NewRateLimiter(10, 24*time.Hour)
+	authHandler := auth.NewHandler(authStore, jwtSecret, cfg.AllowSignup, loginRL, signupRL)
+
+	// Admin middleware chain: authenticate + require admin role.
+	adminMW := func(next http.Handler) http.Handler {
+		return auth.RequireAuth(jwtSecret)(auth.RequireRole(auth.RoleAdmin)(next))
+	}
+
+	// ---- AI client ----
 	aiClient, err := stream.NewGRPCClient(cfg.AIAddr)
 	if err != nil {
 		log.Fatalf("creating AI client: %v", err)
@@ -49,29 +85,96 @@ func main() {
 		}
 	}
 
+	// ---- routes ----
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/stream", stream.NewHandler(aiClient, record))
 	mux.HandleFunc("/api/v1/conversation", conversation.Handler())
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	admin.New(aiClient.Raw(), store, cfg).Register(mux)
+
+	// Auth routes (login, signup, refresh, logout, me, admin user CRUD).
+	authHandler.Register(mux, adminMW)
+
+	// Admin routes — protected by JWT + admin role.
+	adminHandler := admin.New(aiClient.Raw(), store, cfg)
+	adminHandler.RegisterProtected(mux, adminMW)
+
+	// Static webui served at / (API routes win by mux specificity).
 	mux.Handle("/", webui.Handler())
+
+	// ---- background goroutines ----
+	ctx := context.Background()
 
 	// ENV owns the AI service's debug_mode; the sync loop reasserts it
 	// across AI restarts (runtime tuning resets there).
-	go admin.SyncDebugMode(context.Background(), aiClient.Raw(), cfg.IsDev(), debugSyncInterval)
+	go admin.SyncDebugMode(ctx, aiClient.Raw(), cfg.IsDev(), debugSyncInterval)
+
+	// Purge expired refresh tokens periodically.
+	go auth.PurgeLoop(ctx, authStore, tokenPurgeInterval)
 
 	var handler http.Handler = mux
 	if cfg.IsDev() {
 		handler = requestLog(mux)
 	}
 
-	log.Printf("SignMind AI backend listening on %s (AI service: %s, ENV: %s)",
-		cfg.HTTPAddr, cfg.AIAddr, cfg.Env)
+	log.Printf("SignMind AI backend listening on %s (AI service: %s, ENV: %s, signup: %v)",
+		cfg.HTTPAddr, cfg.AIAddr, cfg.Env, cfg.AllowSignup)
 	if err := http.ListenAndServe(cfg.HTTPAddr, handler); err != nil {
 		log.Fatalf("http server: %v", err)
 	}
+}
+
+// openDB creates parent directories and opens the shared SQLite database
+// with WAL + busy_timeout.
+func openDB(path string) (*sql.DB, error) {
+	if dir := filepath.Dir(path); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, fmt.Errorf("creating database dir: %w", err)
+		}
+	}
+	dsn := "file:" + filepath.ToSlash(path) +
+		"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+	return sql.Open("sqlite", dsn)
+}
+
+// resolveJWTSecret loads or generates the HMAC-SHA256 signing key.
+func resolveJWTSecret(cfg config.Config) []byte {
+	if cfg.JWTSecret != "" {
+		return []byte(cfg.JWTSecret)
+	}
+	if !cfg.IsDev() {
+		log.Fatal("SIGNMIND_JWT_SECRET is required in Prod — set it in .env or the environment")
+	}
+	secret, err := auth.GenerateRandomSecret()
+	if err != nil {
+		log.Fatalf("generating dev JWT secret: %v", err)
+	}
+	log.Printf("auth: dev mode — auto-generated JWT secret: %s", hex.EncodeToString(secret))
+	return secret
+}
+
+// seedAdmin creates the initial admin account from config if no admin exists.
+func seedAdmin(store *auth.Store, cfg config.Config) {
+	if cfg.AdminEmail == "" || cfg.AdminPassword == "" {
+		return
+	}
+	// Check if any admin already exists.
+	users, err := store.ListUsers()
+	if err != nil {
+		log.Fatalf("checking existing admins: %v", err)
+	}
+	for _, u := range users {
+		if u.Role == auth.RoleAdmin {
+			log.Printf("auth: admin already exists (id=%d, email=%s) — skipping seed", u.ID, u.Email)
+			return
+		}
+	}
+	u, err := store.CreateUser(cfg.AdminEmail, cfg.AdminPassword, auth.RoleAdmin)
+	if err != nil {
+		log.Fatalf("seeding admin user: %v", err)
+	}
+	log.Printf("auth: seeded admin user id=%d email=%s", u.ID, u.Email)
 }
 
 // requestLog is the Dev-only request logger. The original ResponseWriter is
@@ -85,3 +188,4 @@ func requestLog(next http.Handler) http.Handler {
 			time.Since(started).Round(time.Microsecond))
 	})
 }
+

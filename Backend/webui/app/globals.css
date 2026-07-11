@@ -187,3 +187,101 @@ tr.detail td { background: var(--surface-0); padding: 12px 16px 16px; }
 .notice.success { border-left-color: var(--status-good); }
 progress { width: 100%; max-width: 420px; accent-color: var(--series-1); }
 .empty { color: var(--text-muted); padding: 24px; text-align: center; }
+
+/* ---- login page ---- */
+.login-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: var(--surface-0);
+  padding: 24px;
+}
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 32px 28px;
+}
+.login-header {
+  text-align: center;
+  margin-bottom: 24px;
+}
+.login-header h1 {
+  font-size: 22px;
+  margin: 0 0 4px;
+}
+.login-header p {
+  color: var(--text-muted);
+  margin: 0;
+  font-size: 13px;
+}
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.login-form input {
+  max-width: 100%;
+}
+.login-form button {
+  margin-top: 8px;
+  width: 100%;
+}
+.login-footer {
+  text-align: center;
+  margin-top: 20px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+/* ---- sidebar user info ---- */
+.sidebar-user {
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sidebar-user-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+}
+.sidebar-user-email {
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.sidebar-logout {
+  width: 100%;
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+/* ---- auth loading ---- */
+.auth-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: var(--surface-0);
+}
+.auth-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border);
+  border-top-color: var(--series-1);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

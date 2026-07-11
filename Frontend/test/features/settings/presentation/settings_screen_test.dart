@@ -67,43 +67,12 @@ void main() {
     expect(find.text('เซิร์ฟเวอร์ (Server Connection)'), findsOneWidget);
     expect(container.read(settingsProvider).useSimulatedStream, isTrue);
 
-    // The server section is below the fold in the test viewport.
-    final demoModeTile = find.text('โหมดจำลอง (Demo Mode)');
-    await tester.ensureVisible(demoModeTile);
-    await tester.pumpAndSettle();
-
-    // Demo mode on -> URL field disabled.
-    final urlField = find.byKey(const Key('serverUrlField'));
-    expect(urlField, findsOneWidget);
-    expect(tester.widget<TextFormField>(urlField).enabled, isFalse);
-
-    // Turn demo mode off, then edit the URL.
-    await tester.tap(demoModeTile);
-    await tester.pumpAndSettle();
-    expect(container.read(settingsProvider).useSimulatedStream, isFalse);
-
-    await tester.ensureVisible(urlField);
-    await tester.enterText(urlField, 'ws://192.168.1.50:9000');
-    // Typing alone must not commit or reconnect (that used to fire a
-    // connection attempt on every keystroke) - only the Connect button does.
-    expect(container.read(settingsProvider).serverUrl, 'ws://10.0.2.2:8080');
-
-    final connectButton = find.byKey(const Key('connectServerButton'));
-    await tester.ensureVisible(connectButton);
-    await tester.tap(connectButton);
-    await tester.pumpAndSettle();
-    expect(
-      container.read(settingsProvider).serverUrl,
-      'ws://192.168.1.50:9000',
+    // Verify that the connected server info and changeServerLoginButton are displayed.
+    final changeServerButton = find.byKey(
+      const Key('changeServerLoginButton'),
     );
-
-    // Persisted: a fresh container over the same prefs sees the values.
-    final prefs = await SharedPreferences.getInstance();
-    final second = ProviderContainer(
-      overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
-    );
-    addTearDown(second.dispose);
-    expect(second.read(settingsProvider).serverUrl, 'ws://192.168.1.50:9000');
-    expect(second.read(settingsProvider).useSimulatedStream, isFalse);
+    await tester.ensureVisible(changeServerButton);
+    expect(changeServerButton, findsOneWidget);
+    expect(find.text('โหมดสาธิตออฟไลน์ (Simulated Mode)'), findsOneWidget);
   });
 }

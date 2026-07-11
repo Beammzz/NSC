@@ -14,8 +14,9 @@ Golang REST & WebSocket API server: gateway between the Flutter client and the P
 
 | Path | Owns |
 |---|---|
-| `backend/cmd/server/` | Server entrypoint: config load, route wiring (`/api/v1/stream`, `/api/v1/conversation`, `/healthz`) |
-| `backend/internal/config/` | Environment-based configuration (`SIGNMIND_HTTP_ADDR`, `SIGNMIND_AI_ADDR`) |
+| `backend/cmd/server/` | Server entrypoint: config load, shared SQLite DB, admin seeding, route wiring (`/api/v1/auth/*`, `/api/v1/admin/*`, `/api/v1/stream`, `/api/v1/conversation`, `/healthz`) |
+| `backend/internal/config/` | Environment-based configuration (`SIGNMIND_HTTP_ADDR`, `SIGNMIND_AI_ADDR`, `SIGNMIND_JWT_SECRET`, `SIGNMIND_ADMIN_EMAIL`, `SIGNMIND_ALLOW_SIGNUP`) |
+| `backend/internal/auth/` | Pure stdlib HMAC-SHA256 JWT auth (`/api/v1/auth/*`), user management (`/api/v1/admin/users`), sliding-window rate limiter, SQLite user/refresh token store |
 | `backend/internal/conversation/` | `/api/v1/conversation` REST handler returning Thai reply text, sign gloss, and keypoint transition frames |
 | `backend/internal/httpapi/` | RFC 7807 Problem Details type and response writer |
 | `backend/internal/stream/` | `/api/v1/stream` WebSocket handler, WS message types (mirrors `docs/api/stream-schema.md`), gRPC AI client (`AIClient`/`AIStream` interfaces + `GRPCClient`) |
@@ -23,7 +24,7 @@ Golang REST & WebSocket API server: gateway between the Flutter client and the P
 | `backend/internal/admin/` | `/api/v1/admin/*` REST handlers (status, tuning, predictions, model upload, SSE log stream) + `SyncDebugMode` background goroutine |
 | `backend/internal/predlog/` | Pure-Go SQLite (`modernc.org/sqlite`) prediction history store |
 | `backend/internal/webui/` | Embeds and serves the compiled Next.js admin static export (`dist/`) at `/` |
-| `backend/webui/` | Next.js 15 + React 19 static admin web application source code |
+| `backend/webui/` | Next.js 15 + React 19 static admin web application source code (including AuthProvider, login page, and user management UI) |
 
 ---
 

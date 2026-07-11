@@ -45,6 +45,29 @@ export type UploadResult = {
   feature_dim: number;
 };
 
+// ---- Auth types ----
+
+export type AuthUser = {
+  id: number;
+  email: string;
+  role: string;
+};
+
+export type AuthResponse = {
+  access_token: string;
+  refresh_token?: string;
+  expires_in: number;
+  user: AuthUser;
+};
+
+export type UserRecord = {
+  id: number;
+  email: string;
+  role: string;
+  created_at: number;
+  updated_at: number;
+};
+
 // RFC 7807 problem body returned by the Go server on errors.
 type Problem = { title?: string; detail?: string };
 
@@ -61,7 +84,34 @@ async function asError(resp: Response): Promise<Error> {
 }
 
 async function getJSON<T>(url: string): Promise<T> {
-  const resp = await fetch(url);
+  let resp = await fetch(url);
+  if (resp.status === 401) {
+    // Attempt one silent refresh, then retry.
+    const refreshed = await tryRefresh();
+    if (refreshed) {
+      resp = await fetch(url);
+    }
+  }
+  if (!resp.ok) throw await asError(resp);
+  return (await resp.json()) as T;
+}
+
+async function postJSON<T>(url: string, body: unknown): Promise<T> {
+  let resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (resp.status === 401) {
+    const refreshed = await tryRefresh();
+    if (refreshed) {
+      resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    }
+  }
   if (!resp.ok) throw await asError(resp);
   return (await resp.json()) as T;
 }
@@ -104,3 +154,71 @@ export function formatTime(ms: number): string {
 export function pct(p: number): string {
   return `${(p * 100).toFixed(1)}%`;
 }
+
+// ---- Auth API ----
+
+export async function login(email: string, password: string): Promise<AuthResponse> {
+  const resp = await fetch('/api/v1/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!resp.ok) throw await asError(resp);
+  return (await resp.json()) as AuthResponse;
+}
+
+export async function signup(email: string, password: string): Promise<AuthResponse> {
+  const resp = await fetch('/api/v1/auth/signup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!resp.ok) throw await asError(resp);
+  return (await resp.json()) as AuthResponse;
+}
+
+export async function logout(): Promise<void> {
+  await fetch('/api/v1/auth/logout', { method: 'POST' });
+}
+
+export async function fetchMe(): Promise<AuthUser> {
+  const resp = await fetch('/api/v1/auth/me');
+  if (!resp.ok) throw await asError(resp);
+  return (await resp.json()) as AuthUser;
+}
+
+async function tryRefresh(): Promise<boolean> {
+  try {
+    const resp = await fetch('/api/v1/auth/refresh', { method: 'POST' });
+    return resp.ok;
+  } catch {
+    return false;
+  }
+}
+
+// ---- User Management API (admin) ----
+
+export async function fetchUsers(): Promise<UserRecord[]> {
+  const data = await getJSON<{ users: UserRecord[] }>('/api/v1/admin/users');
+  return data.users;
+}
+
+export async function createUser(
+  email: string,
+  password: string,
+  role: string,
+): Promise<UserRecord> {
+  return postJSON<UserRecord>('/api/v1/admin/users', { email, password, role });
+}
+
+export async function deleteUser(id: number): Promise<void> {
+  let resp = await fetch(`/api/v1/admin/users/${id}`, { method: 'DELETE' });
+  if (resp.status === 401) {
+    const refreshed = await tryRefresh();
+    if (refreshed) {
+      resp = await fetch(`/api/v1/admin/users/${id}`, { method: 'DELETE' });
+    }
+  }
+  if (!resp.ok) throw await asError(resp);
+}
+

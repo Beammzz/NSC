@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:signmind/core/theme/app_theme.dart';
+import 'package:signmind/features/auth/presentation/providers/auth_provider.dart';
 import 'package:signmind/features/scanner/data/services/tsl_stream_service.dart';
 import 'package:signmind/features/scanner/domain/models/scanner_models.dart';
 import 'package:signmind/features/settings/presentation/providers/settings_provider.dart';
@@ -27,14 +29,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   void dispose() {
     _urlController.dispose();
     super.dispose();
-  }
-
-  void _connect(SettingsNotifier notifier) {
-    FocusScope.of(context).unfocus();
-    notifier.setServerUrl(_urlController.text);
-    // setServerUrl rebuilds tslStreamServiceProvider synchronously, so this
-    // reads the fresh service pointed at the URL just committed above.
-    ref.read(tslStreamServiceProvider).start();
   }
 
   @override
@@ -296,77 +290,62 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               const Text(
-                                'ที่อยู่เซิร์ฟเวอร์ (Server URL)',
+                                'ที่อยู่เซิร์ฟเวอร์ที่ใช้งาน (Connected Server IP)',
                                 style: TextStyle(
                                   color: AppTheme.textLight,
                                   fontWeight: FontWeight.w500,
                                 ),
                               ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'ปลายทาง WebSocket ของ SignMind Backend เช่น ws://10.0.2.2:8080',
-                                style: TextStyle(
-                                  color: AppTheme.textMutedDark.withAlpha(200),
-                                  fontSize: 12,
+                              const SizedBox(height: 6),
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 12,
                                 ),
-                              ),
-                              const SizedBox(height: 10),
-                              TextFormField(
-                                key: const Key('serverUrlField'),
-                                controller: _urlController,
-                                enabled: !settings.useSimulatedStream,
-                                onFieldSubmitted: (_) => _connect(notifier),
-                                keyboardType: TextInputType.url,
-                                style: const TextStyle(
-                                  color: AppTheme.textLight,
-                                  fontFamily: 'monospace',
-                                  fontSize: 14,
+                                decoration: BoxDecoration(
+                                  color: AppTheme.darkNavy,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: AppTheme.borderDark,
+                                  ),
                                 ),
-                                decoration: InputDecoration(
-                                  hintText: 'ws://10.0.2.2:8080',
-                                  hintStyle: TextStyle(
-                                    color: AppTheme.textMutedDark.withAlpha(
-                                      150,
-                                    ),
-                                    fontFamily: 'monospace',
-                                    fontSize: 14,
-                                  ),
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 12,
-                                  ),
-                                  filled: true,
-                                  fillColor: AppTheme.darkNavy,
-                                  enabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: const BorderSide(
-                                      color: AppTheme.borderDark,
-                                    ),
-                                  ),
-                                  focusedBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: const BorderSide(
+                                child: Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.dns_outlined,
                                       color: AppTheme.primaryAccent,
+                                      size: 18,
                                     ),
-                                  ),
-                                  disabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: BorderSide(
-                                      color: AppTheme.borderDark.withAlpha(100),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        settings.useSimulatedStream
+                                            ? 'โหมดสาธิตออฟไลน์ (Simulated Mode)'
+                                            : settings.serverUrl,
+                                        style: const TextStyle(
+                                          color: AppTheme.textLight,
+                                          fontFamily: 'monospace',
+                                          fontSize: 14,
+                                        ),
+                                      ),
                                     ),
-                                  ),
+                                  ],
                                 ),
                               ),
-                              const SizedBox(height: 10),
+                              const SizedBox(height: 12),
                               SizedBox(
                                 width: double.infinity,
                                 child: ElevatedButton.icon(
-                                  key: const Key('connectServerButton'),
-                                  onPressed: settings.useSimulatedStream
-                                      ? null
-                                      : () => _connect(notifier),
-                                  icon: const Icon(Icons.link),
-                                  label: const Text('เชื่อมต่อ (Connect)'),
+                                  key: const Key('changeServerLoginButton'),
+                                  onPressed: () {
+                                    ref.read(authProvider.notifier).logout();
+                                    context.go('/login');
+                                  },
+                                  icon: const Icon(Icons.login_outlined),
+                                  label: const Text(
+                                    'เปลี่ยนเซิร์ฟเวอร์ / เข้าสู่ระบบ (Login Page)',
+                                  ),
                                 ),
                               ),
                             ],

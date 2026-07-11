@@ -101,47 +101,64 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
                     ],
                   ),
 
-                  // Live status chip
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primaryAccent.withAlpha(46),
-                      border: Border.all(
-                        color: AppTheme.textMutedDark.withAlpha(89),
-                        width: 1,
+                  // Top Right Actions
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        key: const Key('openLandingButton'),
+                        tooltip: 'ศูนย์แนะนำฟีเจอร์ระบบ',
+                        onPressed: () => context.go('/landing'),
+                        icon: const Icon(
+                          Icons.info_outline,
+                          color: AppTheme.textMutedDark,
+                          size: 20,
+                        ),
                       ),
-                      borderRadius: BorderRadius.circular(99),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        AnimatedBuilder(
-                          animation: _blinkController,
-                          builder: (context, _) {
-                            final opacity = state.isScanning
-                                ? (0.3 + (_blinkController.value * 0.7))
-                                : 1.0;
-                            return Container(
-                              width: 7,
-                              height: 7,
-                              decoration: BoxDecoration(
-                                color: dotColor.withAlpha((opacity.clamp(0.0, 1.0) * 255).round()),
-                                shape: BoxShape.circle,
-                              ),
-                            );
-                          },
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          liveLabel,
-                          style: const TextStyle(
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFFCFE1F8),
+                      const SizedBox(width: 4),
+                      // Live status chip
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryAccent.withAlpha(46),
+                          border: Border.all(
+                            color: AppTheme.textMutedDark.withAlpha(89),
+                            width: 1,
                           ),
+                          borderRadius: BorderRadius.circular(99),
                         ),
-                      ],
-                    ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            AnimatedBuilder(
+                              animation: _blinkController,
+                              builder: (context, _) {
+                                final opacity = state.isScanning
+                                    ? (0.3 + (_blinkController.value * 0.7))
+                                    : 1.0;
+                                return Container(
+                                  width: 7,
+                                  height: 7,
+                                  decoration: BoxDecoration(
+                                    color: dotColor.withAlpha((opacity.clamp(0.0, 1.0) * 255).round()),
+                                    shape: BoxShape.circle,
+                                  ),
+                                );
+                              },
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              liveLabel,
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFFCFE1F8),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),

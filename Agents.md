@@ -104,6 +104,7 @@ repository split and are not yet rebuilt; recreate them under
 - Conversational AI connects via REST/WebSocket API (`/api/v1/conversation`); Speech Recognition (STT) and Text-to-Speech (TTS) run on-device on the mobile client.
 - **Verification Mandate**: Whenever Flutter code is touched, the Agent MUST run `flutter analyze` and `flutter test`.
 - **Test Creation Mandate**: When developing a new feature, the Agent MUST create a corresponding test file so that future bug fixes cause less damage to production.
+- **Feature Introduction Registry Sync Mandate**: Every implemented feature in SignMind AI must be introduced with an interactive launch card on the Landing Page (`Frontend/lib/features/landing/presentation/screens/landing_screen.dart`). When adding or removing a feature, developers MUST update both the Landing Page feature registry and the DOX files (`AGENTS.md` and `Frontend/AGENTS.md`).
 
 ### Python / AI Pipeline Rules
 - Train exclusively on Python 3.10+ with TensorFlow ≥ 2.13 or PyTorch ≥ 2.1
@@ -214,7 +215,7 @@ Before marking any task done:
 
 | Path | AGENTS.md | Covers |
 |---|---|---|
-| `Frontend/` | `Frontend/AGENTS.md` | Flutter mobile app structure, Riverpod patterns, feature layer conventions, WebSocket landmark streaming |
+| `Frontend/` | `Frontend/AGENTS.md` | Flutter mobile app entrypoint (`/login`), Riverpod auth/settings patterns, feature layer conventions, WebSocket landmark streaming |
 | `Backend/` | `Backend/AGENTS.md` | Golang REST & WebSocket API server, gRPC AI inference client, auth, DB schema |
 | `Inference_backend/` | `Inference_backend/AGENTS.md` | Preprocessing spec, gRPC inference service (predict/upload/logs/tuning), model artifacts, TFLite runtime notes |
 | `docs/` | `docs/AGENTS.md` | Documentation standards, API schemas (incl. stream payload), storyboard assets, proposal alignment |

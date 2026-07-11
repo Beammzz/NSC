@@ -23,6 +23,18 @@ type Config struct {
 	Env string
 	// DBPath is the SQLite file for the prediction log.
 	DBPath string
+
+	// JWTSecret is the HMAC-SHA256 signing key for access tokens.
+	// Required in Prod; auto-generated if empty in Dev.
+	JWTSecret string
+	// AdminEmail is the initial admin account email, seeded on first boot
+	// when no admin user exists.
+	AdminEmail string
+	// AdminPassword is the initial admin account password.
+	AdminPassword string
+	// AllowSignup enables the public POST /api/v1/auth/signup endpoint.
+	// When false, only admins can create user accounts.
+	AllowSignup bool
 }
 
 func (c Config) IsDev() bool { return c.Env == EnvDev }
@@ -48,10 +60,14 @@ func load(fileVars map[string]string) Config {
 		env = EnvDev
 	}
 	return Config{
-		HTTPAddr: get("SIGNMIND_HTTP_ADDR", ":8080"),
-		AIAddr:   get("SIGNMIND_AI_ADDR", "localhost:50051"),
-		Env:      env,
-		DBPath:   get("SIGNMIND_DB_PATH", "data/predictions.db"),
+		HTTPAddr:      get("SIGNMIND_HTTP_ADDR", ":8080"),
+		AIAddr:        get("SIGNMIND_AI_ADDR", "localhost:50051"),
+		Env:           env,
+		DBPath:        get("SIGNMIND_DB_PATH", "data/predictions.db"),
+		JWTSecret:     get("SIGNMIND_JWT_SECRET", ""),
+		AdminEmail:    get("SIGNMIND_ADMIN_EMAIL", ""),
+		AdminPassword: get("SIGNMIND_ADMIN_PASSWORD", ""),
+		AllowSignup:   strings.EqualFold(get("SIGNMIND_ALLOW_SIGNUP", "true"), "true"),
 	}
 }
 

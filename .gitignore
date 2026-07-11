@@ -332,3 +332,11 @@ cython_debug/
 X_raw.npy
 y_raw.npy
 groups_raw.npy
+
+# SQLite databases
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+Backend/data/*.db*

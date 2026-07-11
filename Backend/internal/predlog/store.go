@@ -91,6 +91,15 @@ func Open(path string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
+// OpenWith applies the prediction schema to an existing *sql.DB. The caller
+// owns the DB lifetime (Close is a no-op on a shared DB).
+func OpenWith(db *sql.DB) (*Store, error) {
+	if _, err := db.Exec(schema); err != nil {
+		return nil, fmt.Errorf("migrating prediction log: %w", err)
+	}
+	return &Store{db: db}, nil
+}
+
 func (s *Store) Close() error { return s.db.Close() }
 
 // Insert logs one prediction. A zero CreatedMS is stamped with the current

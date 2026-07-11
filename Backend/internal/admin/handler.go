@@ -48,13 +48,23 @@ func New(ai pb.TslInferenceClient, store *predlog.Store, cfg config.Config) *Han
 	return &Handler{ai: ai, store: store, cfg: cfg}
 }
 
-// Register mounts the admin routes on mux.
+// Register mounts the admin routes on mux (unprotected — for tests).
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/admin/status", h.status)
 	mux.HandleFunc("PUT /api/v1/admin/tuning", h.setTuning)
 	mux.HandleFunc("GET /api/v1/admin/predictions", h.predictions)
 	mux.HandleFunc("POST /api/v1/admin/model", h.uploadModel)
 	mux.HandleFunc("GET /api/v1/admin/logs", h.logs)
+}
+
+// RegisterProtected mounts admin routes wrapped with the provided auth
+// middleware chain (RequireAuth + RequireRole("admin") in production).
+func (h *Handler) RegisterProtected(mux *http.ServeMux, mw func(http.Handler) http.Handler) {
+	mux.Handle("GET /api/v1/admin/status", mw(http.HandlerFunc(h.status)))
+	mux.Handle("PUT /api/v1/admin/tuning", mw(http.HandlerFunc(h.setTuning)))
+	mux.Handle("GET /api/v1/admin/predictions", mw(http.HandlerFunc(h.predictions)))
+	mux.Handle("POST /api/v1/admin/model", mw(http.HandlerFunc(h.uploadModel)))
+	mux.Handle("GET /api/v1/admin/logs", mw(http.HandlerFunc(h.logs)))
 }
 
 // ---- status ----
