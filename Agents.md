@@ -123,6 +123,7 @@ repository split and are not yet rebuilt; recreate them under
   - Refresh tokens are stored server-side (hashed) and are revocable; logout invalidates the refresh token
   - Tokens are transmitted only via HTTPS/WSS; never in URL query parameters
 - Real-time TSL translation frames are streamed to `/api/v1/stream`; backend forwards landmark sequences to the internal Python AI service via **gRPC** (bidirectional streaming). HTTP fallback is not permitted for the landmark stream path.
+- `/api/v1/stream` and `/api/v1/conversation` require an authenticated JWT (any role): `Authorization: Bearer` header (WS: on the upgrade request) or the auth cookie. Client-side demo/simulated mode never contacts the server and needs no account.
 - The WebSocket message payload schema for `/api/v1/stream` is versioned and defined in `docs/api/stream-schema.md`; every payload includes a `schema_version` field. Breaking changes require a version bump and a DOX update.
 - NLP and Conversational AI bridge calls go through `/api/v1/conversation` (returns `reply_text`, `reply_sign_gloss`, and server-generated `keypoint_transitions` with LLM auto-correction for client avatar rendering); STT and TTS execute on-device on the client
 - Error responses follow RFC 7807 (Problem Details for HTTP APIs)
@@ -215,7 +216,7 @@ Before marking any task done:
 
 | Path | AGENTS.md | Covers |
 |---|---|---|
-| `Frontend/` | `Frontend/AGENTS.md` | Flutter mobile app entrypoint (`/login`), Riverpod auth/settings patterns, feature layer conventions, WebSocket landmark streaming |
-| `Backend/` | `Backend/AGENTS.md` | Golang REST & WebSocket API server, gRPC AI inference client, auth, DB schema |
+| `Frontend/` | `Frontend/AGENTS.md` | Flutter mobile app entrypoint (`/login`), Riverpod auth/settings patterns, feature layer conventions, WebSocket landmark streaming, Learn tab (dictionary + exercise roadmap) |
+| `Backend/` | `Backend/AGENTS.md` | Golang REST & WebSocket API server, gRPC AI inference client, auth, learning content API, DB schema |
 | `Inference_backend/` | `Inference_backend/AGENTS.md` | Preprocessing spec, gRPC inference service (predict/upload/logs/tuning), model artifacts, TFLite runtime notes |
 | `docs/` | `docs/AGENTS.md` | Documentation standards, API schemas (incl. stream payload), storyboard assets, proposal alignment |

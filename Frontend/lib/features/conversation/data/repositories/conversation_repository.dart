@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:signmind/features/auth/presentation/providers/auth_provider.dart';
 import 'package:signmind/features/conversation/domain/models/conversation_models.dart';
 import 'package:signmind/features/scanner/domain/models/scanner_models.dart';
 import 'package:signmind/features/settings/presentation/providers/settings_provider.dart';
@@ -43,8 +44,9 @@ class SimulatedConversationRepository implements ConversationRepository {
 
 class HttpConversationRepository implements ConversationRepository {
   final String baseUrl;
+  final String? accessToken;
 
-  HttpConversationRepository({required this.baseUrl});
+  HttpConversationRepository({required this.baseUrl, this.accessToken});
 
   @override
   Future<ConversationMessage> sendMessage(String text) async {
@@ -53,6 +55,10 @@ class HttpConversationRepository implements ConversationRepository {
       final uri = Uri.parse('$baseUrl/api/v1/conversation');
       final request = await client.postUrl(uri);
       request.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
+      if (accessToken != null) {
+        request.headers
+            .set(HttpHeaders.authorizationHeader, 'Bearer $accessToken');
+      }
       request.write(jsonEncode({'message': text, 'locale': 'th-TH'}));
 
       final response = await request.close();
@@ -106,7 +112,10 @@ final conversationRepositoryProvider = Provider<ConversationRepository>((ref) {
   if (useSimulated) {
     return SimulatedConversationRepository();
   }
+  final accessToken =
+      ref.watch(authProvider.select((s) => s.accessToken));
   return HttpConversationRepository(
     baseUrl: serverUrl.replaceFirst('ws://', 'http://').replaceFirst('wss://', 'https://'),
+    accessToken: accessToken,
   );
 });

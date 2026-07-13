@@ -17,8 +17,9 @@ Flutter mobile client (Android 9+ / iOS 13+): real-time TSL scanner, AI sign-lan
 | `frontend/lib/core/` | Core theme (`app_theme.dart`), router (`app_router.dart`), and shared shell (`main_scaffold.dart`) |
 | `frontend/lib/features/<name>/` | One folder per feature (`auth`, `landing`, `scanner`, `settings`, `ai_tutor`, `conversation`, `learn`) with `presentation/`, `domain/`, `data/` layers |
 | `frontend/lib/features/auth/` | Authentication feature (`authProvider`, `LoginScreen`) supporting live JWT login/signup or offline simulated demo mode. Contains embedded Server IP configuration card (`serverUrl`). |
-| `frontend/lib/features/scanner/data/services/tsl_stream_service.dart` | `TslStreamService` interface + `SimulatedTslStreamService` (demo loop) + `WebSocketTslStreamService` (real client for `<serverUrl>/api/v1/stream` per `docs/api/stream-schema.md`); provider picks one from the settings `useSimulatedStream` / `serverUrl` fields |
+| `frontend/lib/features/scanner/data/services/tsl_stream_service.dart` | `TslStreamService` interface + `SimulatedTslStreamService` (demo loop) + `WebSocketTslStreamService` (real client for `<serverUrl>/api/v1/stream` per `docs/api/stream-schema.md`, sends `Authorization: Bearer` from `authProvider` on the WS handshake); provider picks one from the settings `useSimulatedStream` / `serverUrl` fields and the auth access token |
 | `frontend/lib/features/settings/` | App settings view displaying connected Server IP and demo-mode status; persisted via `shared_preferences` behind `sharedPreferencesProvider` (overridden in `main()` and in tests) |
+| `frontend/lib/features/learn/` | Learn tab: TSL dictionary (searchable, category-grouped, `SignAvatar` keypoint animation with procedural fallback) and exercise roadmap (topics -> perform-the-sign exercises, pass at model confidence >= the exercise's admin-set threshold). `LearnRepository` (HTTP `/api/v1/learn/*` + simulated demo variant); full-screen practice route `/learn/practice` reuses the scanner camera pipeline |
 | `frontend/pubspec.yaml` | Dependencies (including `google_fonts` / Kanit typography) and app metadata |
 | `frontend/test/` | Automated unit and widget tests per feature and core module |
 
@@ -28,7 +29,7 @@ Flutter mobile client (Android 9+ / iOS 13+): real-time TSL scanner, AI sign-lan
 
 - State management: Riverpod only. Navigation: GoRouter only. (Root rules — non-negotiable.)
 - Naming: `snake_case` files, `PascalCase` classes, `camelCase` variables.
-- Entrypoint & Authentication Flow: The application initializes at `/login` (`LoginScreen`). `GoRouter.redirect` verifies `authProvider.isAuthenticated`; unauthenticated users or users who disconnect/logout are automatically returned to `/login`.
+- Entrypoint & Authentication Flow: The application initializes at `/login` (`LoginScreen`). `GoRouter.redirect` verifies `authProvider.isAuthenticated`; unauthenticated users or users who disconnect/logout are automatically returned to `/login`. `LoginScreen` includes a "Remember credentials" checkbox that saves and pre-populates email/password across sessions via `settingsProvider` and `SharedPreferences`.
 - Server IP Configuration: Configured directly on the Login Page (`LoginScreen`) before authenticating or entering demo mode. Settings Page displays the active server IP read-only with a shortcut back to `/login` to switch servers.
 - Real-time recognition streams feature vectors over WebSocket to `/api/v1/stream`; vector layout follows the root **Feature Vector Spec** — do not restate dimensions in frontend code comments, reference the spec.
 - Conversational AI and Speech Recognition use REST/WebSocket per root API rules.
@@ -42,6 +43,7 @@ Flutter mobile client (Android 9+ / iOS 13+): real-time TSL scanner, AI sign-lan
 - Keep landmark extraction (MediaPipe on-device) isolated in a `data/` layer service so the WebSocket transport and UI stay decoupled.
 - Scanner camera preview uses the `camera` plugin (back camera, `enableAudio: false`) behind `cameraControllerProvider` in `scanner/presentation/providers/`; needs `android.permission.CAMERA`. The provider resolves to `null` when no camera is usable (no permission/hardware, or under `flutter test`) so the viewport falls back to its gradient. Stage B will move capture to a native CameraX session that also feeds MediaPipe.
 - Tests that touch `settingsProvider` (directly or via widgets that watch it) must call `SharedPreferences.setMockInitialValues({})` and override `sharedPreferencesProvider`.
+- The native camera preview mounts only on the scanner tab; full-screen flows outside the tab shell that need it (exercise practice) must set `cameraMountOverrideProvider` while visible and release it on dispose. In demo mode the simulated stream never emits exercise vocabulary, so the practice screen grants a simulated pass after a few detected frames (`useSimulatedStream` only).
 - WS payloads follow `docs/api/stream-schema.md` (schema_version 1); change the schema doc first, then `tsl_stream_service.dart`.
 - Feature folders own their state; shared widgets/utilities only get promoted out of a feature once a second feature needs them.
 

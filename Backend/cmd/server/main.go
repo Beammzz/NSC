@@ -15,6 +15,7 @@ import (
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/auth"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/config"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/conversation"
+	"gitea.harumi.dev/Harumi/NSC/backend/internal/learn"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/pb"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/predlog"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/stream"
@@ -58,11 +59,12 @@ func main() {
 
 	loginRL := auth.NewRateLimiter(5, time.Minute)
 	signupRL := auth.NewRateLimiter(10, 24*time.Hour)
-	authHandler := auth.NewHandler(authStore, jwtSecret, cfg.AllowSignup, loginRL, signupRL)
+	authHandler := auth.NewHandler(authStore, jwtSecret, cfg.AllowSignup, cfg.TrustProxy, loginRL, signupRL)
 
-	// Admin middleware chain: authenticate + require admin role.
+	// Middleware: any authenticated user / admin role.
+	requireAuth := auth.RequireAuth(jwtSecret)
 	adminMW := func(next http.Handler) http.Handler {
-		return auth.RequireAuth(jwtSecret)(auth.RequireRole(auth.RoleAdmin)(next))
+		return requireAuth(auth.RequireRole(auth.RoleAdmin)(next))
 	}
 
 	// ---- AI client ----
@@ -86,9 +88,11 @@ func main() {
 	}
 
 	// ---- routes ----
+	// The data endpoints require a valid JWT (any role): the Flutter client
+	// sends "Authorization: Bearer" — on the WS handshake for /stream.
 	mux := http.NewServeMux()
-	mux.Handle("/api/v1/stream", stream.NewHandler(aiClient, record))
-	mux.HandleFunc("/api/v1/conversation", conversation.Handler())
+	mux.Handle("/api/v1/stream", requireAuth(stream.NewHandler(aiClient, record)))
+	mux.Handle("/api/v1/conversation", requireAuth(http.HandlerFunc(conversation.Handler())))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -99,6 +103,17 @@ func main() {
 	// Admin routes — protected by JWT + admin role.
 	adminHandler := admin.New(aiClient.Raw(), store, cfg)
 	adminHandler.RegisterProtected(mux, adminMW)
+
+	// Learning tab: dictionary, exercise roadmap, progress (user routes)
+	// plus topic/exercise CRUD (admin routes).
+	learnStore, err := learn.OpenWith(db)
+	if err != nil {
+		log.Fatalf("opening learn store: %v", err)
+	}
+	if err := learn.Seed(learnStore); err != nil {
+		log.Fatalf("seeding learn content: %v", err)
+	}
+	learn.NewHandler(learnStore).RegisterProtected(mux, requireAuth, adminMW)
 
 	// Static webui served at / (API routes win by mux specificity).
 	mux.Handle("/", webui.Handler())

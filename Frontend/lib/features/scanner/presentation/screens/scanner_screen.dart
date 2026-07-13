@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -13,29 +15,41 @@ class ScannerScreen extends ConsumerStatefulWidget {
   ConsumerState<ScannerScreen> createState() => _ScannerScreenState();
 }
 
-class _ScannerScreenState extends ConsumerState<ScannerScreen>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _blinkController;
-
-  @override
-  void initState() {
-    super.initState();
-    _blinkController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1400),
-    )..repeat(reverse: true);
-  }
+class _ScannerScreenState extends ConsumerState<ScannerScreen> {
+  // The live dot blinks via a coarse periodic toggle, NOT an
+  // AnimationController: with the hybrid-composition camera PlatformView on
+  // screen, Flutter rasters on the merged main thread, so a repeating vsync
+  // animation re-rasters the whole scene at 60Hz and starves MediaPipe's GPU
+  // inference (measured: the dot alone dragged the landmark pipeline from
+  // ~12fps to ~7fps on a Redmi Note 12 5G).
+  Timer? _blinkTimer;
+  bool _blinkOn = true;
 
   @override
   void dispose() {
-    _blinkController.dispose();
+    _blinkTimer?.cancel();
     super.dispose();
+  }
+
+  /// Keeps the blink ticking only while scanning. Called from build, so it
+  /// only starts/cancels the timer; repaints happen on later ticks.
+  void _syncBlinkTimer(bool scanning) {
+    if (scanning && _blinkTimer == null) {
+      _blinkTimer = Timer.periodic(const Duration(milliseconds: 700), (_) {
+        setState(() => _blinkOn = !_blinkOn);
+      });
+    } else if (!scanning && _blinkTimer != null) {
+      _blinkTimer!.cancel();
+      _blinkTimer = null;
+      _blinkOn = true;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(scannerProvider);
     final notifier = ref.read(scannerProvider.notifier);
+    _syncBlinkTimer(state.isScanning);
 
     final isDetecting = state.isScanning && state.demoPhase == 0;
     final liveLabel = state.isScanning
@@ -130,21 +144,15 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            AnimatedBuilder(
-                              animation: _blinkController,
-                              builder: (context, _) {
-                                final opacity = state.isScanning
-                                    ? (0.3 + (_blinkController.value * 0.7))
-                                    : 1.0;
-                                return Container(
-                                  width: 7,
-                                  height: 7,
-                                  decoration: BoxDecoration(
-                                    color: dotColor.withAlpha((opacity.clamp(0.0, 1.0) * 255).round()),
-                                    shape: BoxShape.circle,
-                                  ),
-                                );
-                              },
+                            Container(
+                              width: 7,
+                              height: 7,
+                              decoration: BoxDecoration(
+                                // Dim phase matches the old animation's 0.3
+                                // opacity floor; solid when paused.
+                                color: dotColor.withAlpha(_blinkOn ? 255 : 77),
+                                shape: BoxShape.circle,
+                              ),
                             ),
                             const SizedBox(width: 6),
                             Text(

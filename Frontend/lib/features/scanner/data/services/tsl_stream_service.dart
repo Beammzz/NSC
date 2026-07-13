@@ -2,8 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:signmind/features/auth/presentation/providers/auth_provider.dart';
 import 'package:signmind/features/scanner/domain/models/scanner_models.dart';
 import 'package:signmind/features/settings/presentation/providers/settings_provider.dart';
+import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 abstract class TslStreamService {
@@ -135,13 +137,25 @@ TranslationFrame? parseServerMessage(
 class WebSocketTslStreamService implements TslStreamService {
   WebSocketTslStreamService({
     required this.baseUrl,
+    this.accessToken,
     WebSocketChannel Function(Uri uri)? connect,
-  }) : _connect = connect ?? WebSocketChannel.connect;
+  }) : _connect = connect ?? _bearerConnect(accessToken);
+
+  /// Default connector: dart:io WebSocket carrying the JWT on the handshake
+  /// headers — the backend authenticates /api/v1/stream before upgrading.
+  static WebSocketChannel Function(Uri uri) _bearerConnect(String? token) {
+    return (uri) => IOWebSocketChannel.connect(
+          uri,
+          headers:
+              token == null ? null : {'Authorization': 'Bearer $token'},
+        );
+  }
 
   static const _schemaVersion = 1;
   static const _streamPath = '/api/v1/stream';
 
   final String baseUrl;
+  final String? accessToken;
   final WebSocketChannel Function(Uri uri) _connect;
   final _controller = StreamController<TranslationFrame>.broadcast();
   final _statusController = StreamController<ConnectionStatus>.broadcast();
@@ -167,9 +181,19 @@ class WebSocketTslStreamService implements TslStreamService {
   }
 
   Uri get _streamUri {
-    final base = baseUrl.endsWith('/')
+    var base = baseUrl.endsWith('/')
         ? baseUrl.substring(0, baseUrl.length - 1)
         : baseUrl;
+    // Normalize scheme: WebSocketChannel.connect requires ws:// or wss://.
+    // Users may enter http:// or https:// in the server URL field — convert
+    // them so the connection succeeds instead of immediately disconnecting.
+    if (base.startsWith('https://')) {
+      base = 'wss://${base.substring(8)}';
+    } else if (base.startsWith('http://')) {
+      base = 'ws://${base.substring(7)}';
+    } else if (!base.startsWith('ws://') && !base.startsWith('wss://')) {
+      base = 'ws://$base';
+    }
     return Uri.parse('$base$_streamPath');
   }
 
@@ -293,9 +317,11 @@ final tslStreamServiceProvider = Provider<TslStreamService>((ref) {
   final (useSimulated, serverUrl) = ref.watch(
     settingsProvider.select((s) => (s.useSimulatedStream, s.serverUrl)),
   );
+  final accessToken =
+      ref.watch(authProvider.select((s) => s.accessToken));
   final TslStreamService service = useSimulated
       ? SimulatedTslStreamService()
-      : WebSocketTslStreamService(baseUrl: serverUrl);
+      : WebSocketTslStreamService(baseUrl: serverUrl, accessToken: accessToken);
   ref.onDispose(() => service.dispose());
   return service;
 });

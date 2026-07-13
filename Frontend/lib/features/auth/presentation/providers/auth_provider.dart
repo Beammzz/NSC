@@ -45,13 +45,16 @@ class AuthNotifier extends Notifier<AuthState> {
         final token = data['access_token'] as String?;
         ref.read(settingsProvider.notifier).setServerUrl(serverUrl);
         ref.read(settingsProvider.notifier).toggleSimulatedStream(false);
-        ref.read(tslStreamServiceProvider).start();
+        // Publish the token BEFORE starting the stream: the stream service
+        // provider watches it and rebuilds, so starting first would connect
+        // tokenless and be disposed immediately.
         state = state.copyWith(
           user: user,
           accessToken: token,
           isLoading: false,
           isSimulatedGuest: false,
         );
+        ref.read(tslStreamServiceProvider).start();
         return true;
       } else {
         String msg = 'เข้าสู่ระบบไม่สำเร็จ (${resp.statusCode})';
@@ -95,13 +98,14 @@ class AuthNotifier extends Notifier<AuthState> {
         final token = data['access_token'] as String?;
         ref.read(settingsProvider.notifier).setServerUrl(serverUrl);
         ref.read(settingsProvider.notifier).toggleSimulatedStream(false);
-        ref.read(tslStreamServiceProvider).start();
+        // Token before start() — see login().
         state = state.copyWith(
           user: user,
           accessToken: token,
           isLoading: false,
           isSimulatedGuest: false,
         );
+        ref.read(tslStreamServiceProvider).start();
         return true;
       } else {
         String msg = 'สมัครสมาชิกไม่สำเร็จ (${resp.statusCode})';

@@ -7,6 +7,7 @@ import 'package:signmind/features/auth/presentation/providers/auth_provider.dart
 import 'package:signmind/features/auth/presentation/screens/login_screen.dart';
 import 'package:signmind/features/conversation/presentation/screens/conversation_screen.dart';
 import 'package:signmind/features/landing/presentation/screens/landing_screen.dart';
+import 'package:signmind/features/learn/presentation/screens/exercise_practice_screen.dart';
 import 'package:signmind/features/learn/presentation/screens/learn_screen.dart';
 import 'package:signmind/features/scanner/presentation/screens/scanner_screen.dart';
 import 'package:signmind/features/settings/presentation/screens/settings_screen.dart';
@@ -37,6 +38,19 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/landing',
         builder: (context, state) => const LandingScreen(),
+      ),
+      // Full-screen exercise practice, pushed over the tab shell so the
+      // camera viewport isn't constrained by the bottom navigation.
+      GoRoute(
+        path: '/learn/practice',
+        parentNavigatorKey: rootNavigatorKey,
+        builder: (context, state) {
+          final args = state.extra as PracticeArgs;
+          return ExercisePracticeScreen(
+            exercise: args.exercise,
+            topicTitle: args.topicTitle,
+          );
+        },
       ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) {

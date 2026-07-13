@@ -16,6 +16,9 @@ class SettingsNotifier extends Notifier<AppSettings> {
   static const _keyResolution = 'settings.cameraResolution';
   static const _keyServerUrl = 'settings.serverUrl';
   static const _keySimulatedStream = 'settings.useSimulatedStream';
+  static const _keyRememberCredentials = 'settings.rememberCredentials';
+  static const _keySavedEmail = 'settings.savedEmail';
+  static const _keySavedPassword = 'settings.savedPassword';
 
   SharedPreferences get _prefs => ref.read(sharedPreferencesProvider);
 
@@ -36,6 +39,10 @@ class SettingsNotifier extends Notifier<AppSettings> {
       serverUrl: prefs.getString(_keyServerUrl) ?? initial.serverUrl,
       useSimulatedStream:
           prefs.getBool(_keySimulatedStream) ?? initial.useSimulatedStream,
+      rememberCredentials:
+          prefs.getBool(_keyRememberCredentials) ?? initial.rememberCredentials,
+      savedEmail: prefs.getString(_keySavedEmail) ?? initial.savedEmail,
+      savedPassword: prefs.getString(_keySavedPassword) ?? initial.savedPassword,
     );
   }
 
@@ -77,6 +84,32 @@ class SettingsNotifier extends Notifier<AppSettings> {
   void toggleSimulatedStream(bool value) {
     state = state.copyWith(useSimulatedStream: value);
     _prefs.setBool(_keySimulatedStream, value);
+  }
+
+  void setRememberCredentials(bool value) {
+    state = state.copyWith(rememberCredentials: value);
+    _prefs.setBool(_keyRememberCredentials, value);
+    if (!value) {
+      state = state.copyWith(savedEmail: '', savedPassword: '');
+      _prefs.remove(_keySavedEmail);
+      _prefs.remove(_keySavedPassword);
+    }
+  }
+
+  void saveLoginCredentials(String email, String password, bool remember) {
+    state = state.copyWith(
+      rememberCredentials: remember,
+      savedEmail: remember ? email.trim() : '',
+      savedPassword: remember ? password : '',
+    );
+    _prefs.setBool(_keyRememberCredentials, remember);
+    if (remember) {
+      _prefs.setString(_keySavedEmail, email.trim());
+      _prefs.setString(_keySavedPassword, password);
+    } else {
+      _prefs.remove(_keySavedEmail);
+      _prefs.remove(_keySavedPassword);
+    }
   }
 }
 

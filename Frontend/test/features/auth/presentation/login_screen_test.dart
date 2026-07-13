@@ -58,4 +58,36 @@ void main() {
     expect(container.read(authProvider).isAuthenticated, isTrue);
     expect(container.read(authProvider).isSimulatedGuest, isTrue);
   });
+
+  testWidgets('LoginScreen renders remember credentials checkbox and pre-fills saved credentials',
+      (WidgetTester tester) async {
+    SharedPreferences.setMockInitialValues({
+      'settings.useSimulatedStream': false,
+      'settings.rememberCredentials': true,
+      'settings.savedEmail': 'testuser@signmind.local',
+      'settings.savedPassword': 'secretpassword',
+    });
+    final prefs = await SharedPreferences.getInstance();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+        ],
+        child: const MaterialApp(home: LoginScreen()),
+      ),
+    );
+    await tester.pump();
+
+    // Verify checkbox exists and is checked
+    final checkbox = tester.widget<Checkbox>(
+      find.byKey(const Key('rememberCredentialsCheckbox')),
+    );
+    expect(checkbox.value, isTrue);
+
+    // Verify email and password text fields are pre-populated with saved credentials
+    expect(find.text('testuser@signmind.local'), findsOneWidget);
+    expect(find.text('secretpassword'), findsOneWidget);
+  });
 }
+

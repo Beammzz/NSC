@@ -21,17 +21,20 @@ type Handler struct {
 	store       *Store
 	secret      []byte
 	allowSignup bool
+	trustProxy  bool
 	loginRL     *RateLimiter
 	signupRL    *RateLimiter
 }
 
 // NewHandler creates an auth handler. loginRL limits login attempts;
-// signupRL limits account creation (10/day/IP by default).
-func NewHandler(store *Store, secret []byte, allowSignup bool, loginRL, signupRL *RateLimiter) *Handler {
+// signupRL limits account creation (10/day/IP by default). trustProxy
+// gates X-Forwarded-For as the rate-limit key (see RateLimitMiddleware).
+func NewHandler(store *Store, secret []byte, allowSignup, trustProxy bool, loginRL, signupRL *RateLimiter) *Handler {
 	return &Handler{
 		store:       store,
 		secret:      secret,
 		allowSignup: allowSignup,
+		trustProxy:  trustProxy,
 		loginRL:     loginRL,
 		signupRL:    signupRL,
 	}
@@ -41,13 +44,13 @@ func NewHandler(store *Store, secret []byte, allowSignup bool, loginRL, signupRL
 // protected by the provided auth+role middleware chain.
 func (h *Handler) Register(mux *http.ServeMux, adminMW func(http.Handler) http.Handler) {
 	// Public auth endpoints (rate-limited).
-	loginHandler := RateLimitMiddleware(h.loginRL)(http.HandlerFunc(h.login))
+	loginHandler := RateLimitMiddleware(h.loginRL, h.trustProxy)(http.HandlerFunc(h.login))
 	mux.Handle("POST /api/v1/auth/login", loginHandler)
 	mux.HandleFunc("POST /api/v1/auth/refresh", h.refresh)
 	mux.HandleFunc("POST /api/v1/auth/logout", h.logout)
 
 	// Signup: public if AllowSignup, otherwise admin-only.
-	signupHandler := RateLimitMiddleware(h.signupRL)(http.HandlerFunc(h.signup))
+	signupHandler := RateLimitMiddleware(h.signupRL, h.trustProxy)(http.HandlerFunc(h.signup))
 	if h.allowSignup {
 		mux.Handle("POST /api/v1/auth/signup", signupHandler)
 	} else {
@@ -111,7 +114,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.issueTokens(w, user)
+	h.issueTokens(w, r, user)
 }
 
 // ---- signup ----
@@ -158,7 +161,7 @@ func (h *Handler) signup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("auth: new user signup id=%d email=%s", user.ID, user.Email)
-	h.issueTokens(w, user)
+	h.issueTokens(w, r, user)
 }
 
 // ---- refresh ----
@@ -220,7 +223,7 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.issueTokens(w, user)
+	h.issueTokens(w, r, user)
 }
 
 // ---- logout ----
@@ -237,12 +240,16 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if rawToken != "" {
-		_ = h.store.DeleteRefreshToken(HashToken(rawToken))
+		if err := h.store.DeleteRefreshToken(HashToken(rawToken)); err != nil {
+			log.Printf("auth: revoking refresh token on logout: %v", err)
+		}
 	}
 
-	// Clear cookies.
-	clearCookie(w, "signmind_access")
-	clearCookie(w, "signmind_refresh")
+	// Clear cookies. Each must be cleared with the same Path it was set
+	// with — browsers key cookies by (name, domain, path).
+	secure := requestIsSecure(r)
+	clearCookie(w, "signmind_access", "/", secure)
+	clearCookie(w, "signmind_refresh", refreshCookiePath, secure)
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -364,7 +371,7 @@ func (h *Handler) deleteUser(w http.ResponseWriter, r *http.Request) {
 
 // issueTokens generates access + refresh tokens, sets cookies, and writes
 // the JSON response.
-func (h *Handler) issueTokens(w http.ResponseWriter, user User) {
+func (h *Handler) issueTokens(w http.ResponseWriter, r *http.Request, user User) {
 	accessToken, err := GenerateAccessToken(user.ID, user.Email, user.Role, h.secret)
 	if err != nil {
 		httpapi.WriteProblem(w, httpapi.NewProblem(
@@ -387,7 +394,7 @@ func (h *Handler) issueTokens(w http.ResponseWriter, user User) {
 	}
 
 	// Set HttpOnly cookies for webui.
-	setTokenCookies(w, accessToken, refreshToken)
+	setTokenCookies(w, accessToken, refreshToken, requestIsSecure(r))
 
 	writeJSON(w, authResponse{
 		AccessToken:  accessToken,
@@ -397,35 +404,47 @@ func (h *Handler) issueTokens(w http.ResponseWriter, user User) {
 	})
 }
 
-func setTokenCookies(w http.ResponseWriter, access, refresh string) {
+// refreshCookiePath scopes the refresh cookie to the auth endpoints only.
+const refreshCookiePath = "/api/v1/auth/"
+
+// requestIsSecure reports whether the request arrived over HTTPS, directly
+// (TLS) or via a reverse proxy (X-Forwarded-Proto). Browsers drop
+// Secure cookies on plain-HTTP origins other than localhost, so marking
+// cookies Secure unconditionally breaks webui login on LAN deployments.
+func requestIsSecure(r *http.Request) bool {
+	return r.TLS != nil ||
+		strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
+func setTokenCookies(w http.ResponseWriter, access, refresh string, secure bool) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "signmind_access",
 		Value:    access,
 		Path:     "/",
 		MaxAge:   int(AccessTokenLifetime.Seconds()),
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   secure,
 		SameSite: http.SameSiteStrictMode,
 	})
 	http.SetCookie(w, &http.Cookie{
 		Name:     "signmind_refresh",
 		Value:    refresh,
-		Path:     "/api/v1/auth/",
+		Path:     refreshCookiePath,
 		MaxAge:   int(RefreshTokenLifetime.Seconds()),
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   secure,
 		SameSite: http.SameSiteStrictMode,
 	})
 }
 
-func clearCookie(w http.ResponseWriter, name string) {
+func clearCookie(w http.ResponseWriter, name, path string, secure bool) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     name,
 		Value:    "",
-		Path:     "/",
+		Path:     path,
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   secure,
 		SameSite: http.SameSiteStrictMode,
 	})
 }

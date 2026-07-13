@@ -35,6 +35,10 @@ type Config struct {
 	// AllowSignup enables the public POST /api/v1/auth/signup endpoint.
 	// When false, only admins can create user accounts.
 	AllowSignup bool
+	// TrustProxy trusts X-Forwarded-* headers for client IP and scheme.
+	// Enable ONLY when the server runs behind a reverse proxy that strips
+	// client-supplied values; otherwise rate limits are spoofable.
+	TrustProxy bool
 }
 
 func (c Config) IsDev() bool { return c.Env == EnvDev }
@@ -68,6 +72,7 @@ func load(fileVars map[string]string) Config {
 		AdminEmail:    get("SIGNMIND_ADMIN_EMAIL", ""),
 		AdminPassword: get("SIGNMIND_ADMIN_PASSWORD", ""),
 		AllowSignup:   strings.EqualFold(get("SIGNMIND_ALLOW_SIGNUP", "true"), "true"),
+		TrustProxy:    strings.EqualFold(get("SIGNMIND_TRUST_PROXY", "false"), "true"),
 	}
 }
 

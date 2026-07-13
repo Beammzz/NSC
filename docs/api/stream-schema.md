@@ -10,6 +10,12 @@ Transport: WebSocket (WSS in production). All messages are UTF-8 JSON text
 frames. Every message carries `schema_version` (integer) and `type` (string).
 Unknown `type` values must be rejected with an `error` message, not ignored.
 
+Authentication: the upgrade request must carry a valid JWT access token in
+the `Authorization: Bearer <token>` header (or the `signmind_access` cookie);
+the backend rejects the handshake with a 401 RFC 7807 problem before
+upgrading. Tokens never appear in the URL or in message payloads, so the
+message schema itself is auth-free.
+
 The backend forwards landmark sequences to the Python AI service over gRPC
 bidirectional streaming (`docs/api/tsl_inference.proto`). No HTTP fallback on
 this path (root DOX rule).

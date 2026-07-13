@@ -183,9 +183,12 @@ class CameraPreviewView(
         // Both models default to CPU, which caps two-model throughput at ~6fps on
         // this device; run them on the GPU delegate and fall back to CPU only if
         // GPU init throws (unsupported driver / emulator).
-        // Hand stays on the GPU: the CPU/XNNPACK path was measured erratic
-        // (45-190ms) on the target device — it contends with the Flutter UI
-        // and the rest of the app — while GPU holds a steadier 30-90ms.
+        // Hand stays on the GPU. Re-measured 2026-07-12 on the release build
+        // (Redmi Note 12 5G, two hands tracked): GPU 70-98ms vs CPU/XNNPACK
+        // 51-115ms — same ~8.9fps either way, but CPU-hand made the GPU pose
+        // slower (56-81ms vs 33-45ms) and steals big cores from Dart. Two-hand
+        // tracking is compute-bound on this class of device; <=1 hand hits the
+        // 12fps cap.
         if (handLandmarker == null) {
             handLandmarker = try {
                 buildHandLandmarker(Delegate.GPU)
@@ -310,8 +313,14 @@ class CameraPreviewView(
     companion object {
         private const val TAG = "SignMindCamera"
         private const val HAND_MODEL = "hand_landmarker.task"
-        private const val POSE_MODEL = "pose_landmarker_full.task"
-        private const val POSE_FRAME_STRIDE = 2
+        // Lite variant on purpose: pose only feeds the slow-moving torso
+        // normalization + overlay, and full cost 46-180ms/frame on the GPU of
+        // a Redmi Note 12 5G vs ~15-40ms for lite.
+        private const val POSE_MODEL = "pose_landmarker_lite.task"
+        // Stride 3 keeps pose+hand under the 83ms/frame budget of TARGET_FPS
+        // on the Redmi Note 12 5G class of GPU; pose refreshes ~4x/s, enough
+        // for the slow-moving torso normalization it feeds.
+        private const val POSE_FRAME_STRIDE = 3
         private const val TARGET_FPS = 12
         private const val FRAME_INTERVAL_MS = 1000L / TARGET_FPS
     }

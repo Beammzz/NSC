@@ -12,6 +12,7 @@ class ScannerNotifier extends Notifier<ScannerState> {
   StreamSubscription<TranslationFrame>? _streamSub;
   StreamSubscription<ConnectionStatus>? _statusSub;
   StreamSubscription<bool>? _ttsSub;
+  DateTime _lastCosmeticWrite = DateTime.fromMillisecondsSinceEpoch(0);
 
   @override
   ScannerState build() {
@@ -26,7 +27,10 @@ class ScannerNotifier extends Notifier<ScannerState> {
 
     _frameSub = landmarkService.frameStream.listen((frame) {
       if (state.isScanning) {
-        state = state.copyWith(currentFrame: frame);
+        // High-rate (~12/s) frames go to their own provider so only the
+        // skeleton overlay rebuilds per frame; routing them through
+        // ScannerState rebuilt the whole screen (see currentFrameProvider).
+        ref.read(currentFrameProvider.notifier).set(frame);
         streamService.sendVector(buildFeatureVector(frame));
       }
     });
@@ -49,6 +53,23 @@ class ScannerNotifier extends Notifier<ScannerState> {
       if (wordAdded && ref.read(settingsProvider).autoSpeak) {
         ref.read(ttsServiceProvider).speak(frame.word);
       }
+
+      // The real server replies once per landmark frame (~12/s), and its
+      // fps/latency/confidence jitter on every message, so equality checks
+      // cannot dedupe them (measured: the UI re-rastered 29x/s). Words and
+      // detection-phase changes render immediately (a phase flip always
+      // changes `word` to/from '…'); the cosmetic chip fields coalesce to
+      // 2 writes/s — every state write rebuilds the whole scanner screen on
+      // the merged main thread (camera platform view), competing with
+      // MediaPipe's GPU inference on low-end devices.
+      final now = DateTime.now();
+      final urgent = wordAdded || frame.word != state.currentWord;
+      if (!urgent &&
+          now.difference(_lastCosmeticWrite) <
+              const Duration(milliseconds: 500)) {
+        return;
+      }
+      _lastCosmeticWrite = now;
 
       state = state.copyWith(
         currentWord: frame.word,
@@ -108,3 +129,35 @@ class ScannerNotifier extends Notifier<ScannerState> {
 }
 
 final scannerProvider = NotifierProvider<ScannerNotifier, ScannerState>(ScannerNotifier.new);
+
+/// Latest raw landmark frame while scanning (frozen on pause), fed by
+/// [ScannerNotifier]'s frame subscription. Deliberately OUTSIDE ScannerState:
+/// it updates ~12x/s, and anything watching the whole scanner state would
+/// rebuild — and, with the camera platform view merging Flutter's raster
+/// thread onto the main thread, re-raster — the entire screen at that rate,
+/// starving MediaPipe's GPU inference (measured 7fps vs the 12fps target on
+/// a Redmi Note 12 5G). Watch this only from the skeleton overlay.
+class CurrentFrameNotifier extends Notifier<RawLandmarkFrame?> {
+  @override
+  RawLandmarkFrame? build() => null;
+
+  void set(RawLandmarkFrame frame) => state = frame;
+}
+
+final currentFrameProvider =
+    NotifierProvider<CurrentFrameNotifier, RawLandmarkFrame?>(
+        CurrentFrameNotifier.new);
+
+/// Requests the native camera preview to mount even though the scanner tab
+/// is not the visible tab. Set by full-screen flows outside the tab shell
+/// that reuse the scanner pipeline (e.g. the Learn tab's exercise practice
+/// screen) and released when they close.
+class CameraMountOverride extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  void set(bool value) => state = value;
+}
+
+final cameraMountOverrideProvider =
+    NotifierProvider<CameraMountOverride, bool>(CameraMountOverride.new);

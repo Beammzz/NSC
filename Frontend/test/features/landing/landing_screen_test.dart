@@ -23,7 +23,7 @@ void main() {
     expect(find.text('สแกนแปลภาษามือ'), findsOneWidget);
     expect(find.text('ครูฝึก AI'), findsOneWidget);
     expect(find.text('สนทนาไร้รอยต่อ'), findsOneWidget);
-    expect(find.text('คลังคำศัพท์'), findsOneWidget);
+    expect(find.text('เรียนรู้ภาษามือ'), findsOneWidget);
     expect(find.text('ตั้งค่าระบบและ AI Tuning'), findsOneWidget);
   });
 }

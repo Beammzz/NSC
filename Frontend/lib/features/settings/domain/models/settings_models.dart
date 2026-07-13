@@ -14,6 +14,15 @@ class AppSettings {
   /// connecting to [serverUrl].
   final bool useSimulatedStream;
 
+  /// Whether credentials should be remembered on LoginScreen.
+  final bool rememberCredentials;
+
+  /// Saved email for LoginScreen pre-fill.
+  final String savedEmail;
+
+  /// Saved password for LoginScreen pre-fill.
+  final String savedPassword;
+
   const AppSettings({
     required this.isDarkMode,
     required this.showHandSkeleton,
@@ -23,6 +32,9 @@ class AppSettings {
     required this.cameraResolution,
     required this.serverUrl,
     required this.useSimulatedStream,
+    required this.rememberCredentials,
+    required this.savedEmail,
+    required this.savedPassword,
   });
 
   factory AppSettings.initial() {
@@ -36,6 +48,9 @@ class AppSettings {
       // Android-emulator loopback to a backend on the host machine.
       serverUrl: 'ws://10.0.2.2:8080',
       useSimulatedStream: true,
+      rememberCredentials: true,
+      savedEmail: '',
+      savedPassword: '',
     );
   }
 
@@ -48,6 +63,9 @@ class AppSettings {
     String? cameraResolution,
     String? serverUrl,
     bool? useSimulatedStream,
+    bool? rememberCredentials,
+    String? savedEmail,
+    String? savedPassword,
   }) {
     return AppSettings(
       isDarkMode: isDarkMode ?? this.isDarkMode,
@@ -58,6 +76,10 @@ class AppSettings {
       cameraResolution: cameraResolution ?? this.cameraResolution,
       serverUrl: serverUrl ?? this.serverUrl,
       useSimulatedStream: useSimulatedStream ?? this.useSimulatedStream,
+      rememberCredentials: rememberCredentials ?? this.rememberCredentials,
+      savedEmail: savedEmail ?? this.savedEmail,
+      savedPassword: savedPassword ?? this.savedPassword,
     );
   }
 }
+

@@ -39,11 +39,11 @@ class LandingScreen extends StatelessWidget {
         route: '/conversation',
       ),
       _FeatureCardData(
-        title: 'คลังคำศัพท์',
-        subtitle: 'Learn TSL Vocabulary',
+        title: 'เรียนรู้ภาษามือ',
+        subtitle: 'Dictionary & Exercises',
         description:
-            'รวบรวมคำศัพท์พื้นฐานภาษามือไทยกว่า 200 คำ พร้อมวิดีโอตัวอย่างและท่าทางมาตรฐานสำหรับฝึกหัด',
-        badge: '200+ Words',
+            'คลังคำศัพท์ภาษามือไทยพร้อมภาพจำลองท่าทาง และแบบฝึกหัดตามหมวดหมู่แบบแผนที่บทเรียน ผ่านเมื่อทำท่าถูกต้องตามเกณฑ์ความเชื่อมั่นของ AI',
+        badge: 'Roadmap',
         accentColor: AppTheme.warningOrange,
         icon: Icons.menu_book_outlined,
         route: '/learn',

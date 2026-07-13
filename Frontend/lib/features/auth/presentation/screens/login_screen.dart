@@ -19,14 +19,20 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   late final TextEditingController _passwordController;
   late final TabController _tabController;
   bool _isDemoMode = false;
+  bool _rememberCredentials = true;
 
   @override
   void initState() {
     super.initState();
     final settings = ref.read(settingsProvider);
     _urlController = TextEditingController(text: settings.serverUrl);
-    _emailController = TextEditingController();
-    _passwordController = TextEditingController();
+    _rememberCredentials = settings.rememberCredentials;
+    _emailController = TextEditingController(
+      text: _rememberCredentials ? settings.savedEmail : '',
+    );
+    _passwordController = TextEditingController(
+      text: _rememberCredentials ? settings.savedPassword : '',
+    );
     _tabController = TabController(length: 2, vsync: this);
     _isDemoMode = settings.useSimulatedStream;
   }
@@ -40,6 +46,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     super.dispose();
   }
 
+  void _toggleRememberCredentials(bool? value) {
+    if (value == null) return;
+    setState(() {
+      _rememberCredentials = value;
+    });
+    ref.read(settingsProvider.notifier).setRememberCredentials(value);
+  }
+
   Future<void> _submitLogin() async {
     FocusScope.of(context).unfocus();
     final notifier = ref.read(authProvider.notifier);
@@ -49,6 +63,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       _urlController.text,
     );
     if (success && mounted) {
+      ref.read(settingsProvider.notifier).saveLoginCredentials(
+            _emailController.text,
+            _passwordController.text,
+            _rememberCredentials,
+          );
       context.go('/landing');
     }
   }
@@ -62,6 +81,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       _urlController.text,
     );
     if (success && mounted) {
+      ref.read(settingsProvider.notifier).saveLoginCredentials(
+            _emailController.text,
+            _passwordController.text,
+            _rememberCredentials,
+          );
       context.go('/landing');
     }
   }
@@ -426,7 +450,57 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                               ),
                             ),
                           ),
-                          const SizedBox(height: 22),
+                          const SizedBox(height: 14),
+                          InkWell(
+                            key: const Key('rememberCredentialsTile'),
+                            onTap: () => _toggleRememberCredentials(
+                              !_rememberCredentials,
+                            ),
+                            borderRadius: BorderRadius.circular(8),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                vertical: 4,
+                                horizontal: 2,
+                              ),
+                              child: Row(
+                                children: [
+                                  SizedBox(
+                                    width: 24,
+                                    height: 24,
+                                    child: Checkbox(
+                                      key: const Key(
+                                        'rememberCredentialsCheckbox',
+                                      ),
+                                      value: _rememberCredentials,
+                                      activeColor: AppTheme.primaryAccent,
+                                      side: BorderSide(
+                                        color:
+                                            AppTheme.textMutedDark.withAlpha(180),
+                                        width: 1.8,
+                                      ),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      onChanged: _toggleRememberCredentials,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      'จำข้อมูลเข้าสู่ระบบ (Remember credentials)',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color:
+                                            AppTheme.textLight.withAlpha(230),
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 20),
 
                           AnimatedBuilder(
                             animation: _tabController,

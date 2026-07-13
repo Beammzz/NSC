@@ -194,6 +194,57 @@ void main() {
 
       expect(statuses, [ConnectionStatus.connecting, ConnectionStatus.disconnected]);
     });
+
+    test('normalizes https:// to wss:// for WebSocket connection', () {
+      Uri? connectedTo;
+      final channel = FakeWebSocketChannel();
+      final service = WebSocketTslStreamService(
+        baseUrl: 'https://my-server.example:8080',
+        connect: (uri) {
+          connectedTo = uri;
+          return channel;
+        },
+      );
+      addTearDown(service.dispose);
+
+      service.start();
+      expect(connectedTo.toString(),
+          'wss://my-server.example:8080/api/v1/stream');
+    });
+
+    test('normalizes http:// to ws:// for WebSocket connection', () {
+      Uri? connectedTo;
+      final channel = FakeWebSocketChannel();
+      final service = WebSocketTslStreamService(
+        baseUrl: 'http://192.168.1.5:8080',
+        connect: (uri) {
+          connectedTo = uri;
+          return channel;
+        },
+      );
+      addTearDown(service.dispose);
+
+      service.start();
+      expect(connectedTo.toString(),
+          'ws://192.168.1.5:8080/api/v1/stream');
+    });
+
+    test('adds ws:// when no scheme is provided', () {
+      Uri? connectedTo;
+      final channel = FakeWebSocketChannel();
+      final service = WebSocketTslStreamService(
+        baseUrl: '192.168.1.5:8080',
+        connect: (uri) {
+          connectedTo = uri;
+          return channel;
+        },
+      );
+      addTearDown(service.dispose);
+
+      service.start();
+      expect(connectedTo.toString(),
+          'ws://192.168.1.5:8080/api/v1/stream');
+    });
   });
 
   group('tslStreamServiceProvider', () {

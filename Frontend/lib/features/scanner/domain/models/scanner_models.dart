@@ -81,7 +81,9 @@ class ScannerState {
   final int fps;
   final double latencySeconds;
   final bool isSpeaking;
-  final RawLandmarkFrame? currentFrame;
+  // NOTE: the live landmark frame is deliberately NOT part of this state —
+  // it updates ~12x/s and lives in `currentFrameProvider` so only the
+  // skeleton overlay rebuilds per frame (see scanner_provider.dart).
   final int demoPhase; // 0=detecting, 1=detected, 2=hold
   final ConnectionStatus connectionStatus;
 
@@ -93,7 +95,6 @@ class ScannerState {
     required this.fps,
     required this.latencySeconds,
     required this.isSpeaking,
-    this.currentFrame,
     required this.demoPhase,
     required this.connectionStatus,
   });
@@ -122,7 +123,6 @@ class ScannerState {
     int? fps,
     double? latencySeconds,
     bool? isSpeaking,
-    RawLandmarkFrame? currentFrame,
     int? demoPhase,
     ConnectionStatus? connectionStatus,
   }) {
@@ -134,7 +134,6 @@ class ScannerState {
       fps: fps ?? this.fps,
       latencySeconds: latencySeconds ?? this.latencySeconds,
       isSpeaking: isSpeaking ?? this.isSpeaking,
-      currentFrame: currentFrame ?? this.currentFrame,
       demoPhase: demoPhase ?? this.demoPhase,
       connectionStatus: connectionStatus ?? this.connectionStatus,
     );

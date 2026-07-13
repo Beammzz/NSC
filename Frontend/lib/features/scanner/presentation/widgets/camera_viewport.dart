@@ -9,6 +9,7 @@ import 'package:signmind/core/theme/app_theme.dart';
 import 'package:signmind/core/widgets/main_scaffold.dart';
 import 'package:signmind/features/scanner/domain/models/scanner_models.dart';
 import 'package:signmind/features/scanner/presentation/providers/camera_provider.dart';
+import 'package:signmind/features/scanner/presentation/providers/scanner_provider.dart';
 
 /// Control channel for the native CameraX session (Stage B), e.g. switching
 /// the bound lens. Matches `MainActivity.CAMERA_CONTROL_CHANNEL`.
@@ -76,13 +77,10 @@ class _CameraViewportState extends ConsumerState<CameraViewport> {
               // pose points — painted over the full preview so it tracks the
               // real body in the camera feed (matches the 147-dim layout).
               Positioned.fill(
-                child: CustomPaint(
-                  painter: _LandmarkOverlayPainter(
-                    frame: state.currentFrame,
-                    isDetected: isDetected,
-                    accentColor: isDetected ? okColor : AppTheme.primaryAccent,
-                    mirror: mirrorOverlay,
-                  ),
+                child: _LandmarkOverlay(
+                  isDetected: isDetected,
+                  accentColor: isDetected ? okColor : AppTheme.primaryAccent,
+                  mirror: mirrorOverlay,
                 ),
               ),
 
@@ -207,8 +205,10 @@ class _CameraViewportState extends ConsumerState<CameraViewport> {
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
       // The shell keeps every tab alive in an IndexedStack; only mount the
       // native preview while the scanner tab is visible so it doesn't bleed
-      // onto other pages or hold the camera in the background.
-      if (ref.watch(bottomTabIndexProvider) != 0) {
+      // onto other pages or hold the camera in the background. Full-screen
+      // flows outside the shell (exercise practice) opt in via the override.
+      if (ref.watch(bottomTabIndexProvider) != 0 &&
+          !ref.watch(cameraMountOverrideProvider)) {
         return const SizedBox.shrink();
       }
       return const _NativeCameraPreview();
@@ -284,6 +284,38 @@ class _NativeCameraPreview extends StatelessWidget {
           ..addOnPlatformViewCreatedListener(params.onPlatformViewCreated)
           ..create();
       },
+    );
+  }
+}
+
+/// Watches the high-rate (~12/s) landmark frames in isolation so only this
+/// subtree rebuilds per frame, and the RepaintBoundary confines the raster
+/// damage to the overlay layer. Without both, every frame re-rastered the
+/// whole screen on the merged main thread (camera platform view) and starved
+/// MediaPipe's GPU inference on low-end devices.
+class _LandmarkOverlay extends ConsumerWidget {
+  const _LandmarkOverlay({
+    required this.isDetected,
+    required this.accentColor,
+    required this.mirror,
+  });
+
+  final bool isDetected;
+  final Color accentColor;
+  final bool mirror;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final frame = ref.watch(currentFrameProvider);
+    return RepaintBoundary(
+      child: CustomPaint(
+        painter: _LandmarkOverlayPainter(
+          frame: frame,
+          isDetected: isDetected,
+          accentColor: accentColor,
+          mirror: mirror,
+        ),
+      ),
     );
   }
 }

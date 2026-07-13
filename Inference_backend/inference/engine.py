@@ -396,7 +396,11 @@ class InferenceEngine:
                 res = model.interpreter.get_tensor(model.output_index)[0]
                 # seconds -> microseconds
                 inference_micros = int((time.perf_counter() - started) * 1_000_000)
-                is_idle = False
+                # If the model's top prediction is the idle class, flag it.
+                is_idle = (
+                    model.idle_idx is not None
+                    and int(np.argmax(res)) == model.idle_idx
+                )
 
             top_prob = float(res.max())
             is_uncertain = top_prob < tuning.confidence_threshold

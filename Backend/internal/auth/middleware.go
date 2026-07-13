@@ -91,19 +91,21 @@ func extractToken(r *http.Request) string {
 
 // RateLimiter tracks per-key request counts within a sliding window.
 type RateLimiter struct {
-	mu      sync.Mutex
-	entries map[string][]time.Time
-	max     int
-	window  time.Duration
+	mu        sync.Mutex
+	entries   map[string][]time.Time
+	max       int
+	window    time.Duration
+	lastSweep time.Time
 }
 
 // NewRateLimiter creates a rate limiter allowing max requests per window
 // per key.
 func NewRateLimiter(max int, window time.Duration) *RateLimiter {
 	return &RateLimiter{
-		entries: make(map[string][]time.Time),
-		max:     max,
-		window:  window,
+		entries:   make(map[string][]time.Time),
+		max:       max,
+		window:    window,
+		lastSweep: time.Now(),
 	}
 }
 
@@ -114,6 +116,25 @@ func (rl *RateLimiter) Allow(key string) bool {
 
 	now := time.Now()
 	cutoff := now.Add(-rl.window)
+
+	// Once per window, drop keys whose entries have all expired — without
+	// this the map grows unboundedly with one entry per distinct key ever
+	// seen (an attacker controls the key when spoofing is possible).
+	if now.Sub(rl.lastSweep) > rl.window {
+		rl.lastSweep = now
+		for k, times := range rl.entries {
+			live := false
+			for _, t := range times {
+				if t.After(cutoff) {
+					live = true
+					break
+				}
+			}
+			if !live {
+				delete(rl.entries, k)
+			}
+		}
+	}
 
 	// Prune expired entries.
 	times := rl.entries[key]
@@ -134,11 +155,14 @@ func (rl *RateLimiter) Allow(key string) bool {
 }
 
 // RateLimitMiddleware wraps a handler with per-IP rate limiting. Returns
-// 429 when the limit is exceeded.
-func RateLimitMiddleware(rl *RateLimiter) func(http.Handler) http.Handler {
+// 429 when the limit is exceeded. trustProxy must be true ONLY behind a
+// reverse proxy that overwrites X-Forwarded-For; otherwise the header is
+// client-controlled and would let an attacker mint a fresh rate-limit
+// bucket per request.
+func RateLimitMiddleware(rl *RateLimiter, trustProxy bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := clientIP(r)
+			ip := clientIP(r, trustProxy)
 			if !rl.Allow(ip) {
 				httpapi.WriteProblem(w, httpapi.NewProblem(
 					http.StatusTooManyRequests, "Rate limit exceeded",
@@ -150,12 +174,14 @@ func RateLimitMiddleware(rl *RateLimiter) func(http.Handler) http.Handler {
 	}
 }
 
-// clientIP extracts the client IP, preferring X-Forwarded-For (first entry)
-// when behind a reverse proxy, falling back to RemoteAddr.
-func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.SplitN(xff, ",", 2)
-		return strings.TrimSpace(parts[0])
+// clientIP extracts the client IP from RemoteAddr, using X-Forwarded-For
+// (first entry) only when trustProxy is set.
+func clientIP(r *http.Request, trustProxy bool) string {
+	if trustProxy {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			parts := strings.SplitN(xff, ",", 2)
+			return strings.TrimSpace(parts[0])
+		}
 	}
 	// RemoteAddr is "ip:port"; strip the port.
 	addr := r.RemoteAddr

@@ -196,6 +196,93 @@ async function tryRefresh(): Promise<boolean> {
   }
 }
 
+// ---- Learning content API (admin) ----
+
+export type LearnExercise = {
+  id: number;
+  topic_id: number;
+  word: string;
+  sort_order: number;
+  pass_confidence: number;
+  published: boolean;
+};
+
+export type LearnTopic = {
+  id: number;
+  slug: string;
+  title: string;
+  icon: string;
+  sort_order: number;
+  published: boolean;
+  exercises: LearnExercise[];
+};
+
+export type LearnSign = {
+  word: string;
+  category: string;
+  has_animation: boolean;
+};
+
+async function sendJSON<T>(method: string, url: string, body?: unknown): Promise<T> {
+  const init = (): RequestInit => ({
+    method,
+    headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  let resp = await fetch(url, init());
+  if (resp.status === 401) {
+    const refreshed = await tryRefresh();
+    if (refreshed) {
+      resp = await fetch(url, init());
+    }
+  }
+  if (!resp.ok) throw await asError(resp);
+  if (resp.status === 204) return undefined as T;
+  return (await resp.json()) as T;
+}
+
+export function fetchLearnTopics(): Promise<LearnTopic[]> {
+  return getJSON<{ topics: LearnTopic[] }>('/api/v1/admin/learn/topics').then((d) => d.topics);
+}
+
+export function fetchLearnSigns(): Promise<LearnSign[]> {
+  return getJSON<{ signs: LearnSign[] }>('/api/v1/learn/dictionary').then((d) => d.signs);
+}
+
+export function createLearnTopic(
+  body: Omit<LearnTopic, 'id' | 'exercises'>,
+): Promise<LearnTopic> {
+  return sendJSON<LearnTopic>('POST', '/api/v1/admin/learn/topics', body);
+}
+
+export function updateLearnTopic(
+  id: number,
+  body: Omit<LearnTopic, 'id' | 'exercises'>,
+): Promise<LearnTopic> {
+  return sendJSON<LearnTopic>('PUT', `/api/v1/admin/learn/topics/${id}`, body);
+}
+
+export function deleteLearnTopic(id: number): Promise<void> {
+  return sendJSON<void>('DELETE', `/api/v1/admin/learn/topics/${id}`);
+}
+
+export function createLearnExercise(
+  body: Omit<LearnExercise, 'id'>,
+): Promise<LearnExercise> {
+  return sendJSON<LearnExercise>('POST', '/api/v1/admin/learn/exercises', body);
+}
+
+export function updateLearnExercise(
+  id: number,
+  body: Omit<LearnExercise, 'id'>,
+): Promise<LearnExercise> {
+  return sendJSON<LearnExercise>('PUT', `/api/v1/admin/learn/exercises/${id}`, body);
+}
+
+export function deleteLearnExercise(id: number): Promise<void> {
+  return sendJSON<void>('DELETE', `/api/v1/admin/learn/exercises/${id}`);
+}
+
 // ---- User Management API (admin) ----
 
 export async function fetchUsers(): Promise<UserRecord[]> {

@@ -15,7 +15,7 @@ func testHandler(t *testing.T) *Handler {
 	secret := []byte("test-secret-32-bytes-long-enough")
 	loginRL := NewRateLimiter(5, time.Minute)
 	signupRL := NewRateLimiter(10, 24*time.Hour)
-	return NewHandler(s, secret, true, loginRL, signupRL) // allowSignup=true for tests
+	return NewHandler(s, secret, true, false, loginRL, signupRL) // allowSignup=true, trustProxy=false
 }
 
 func doJSON(t *testing.T, handler http.HandlerFunc, method, path string, body any) *httptest.ResponseRecorder {
@@ -199,6 +199,113 @@ func TestRateLimiter(t *testing.T) {
 	// Different key should still be allowed.
 	if !rl.Allow("other-ip") {
 		t.Fatal("expected allow for different key")
+	}
+}
+
+func TestRateLimitIgnoresSpoofedXFFByDefault(t *testing.T) {
+	rl := NewRateLimiter(1, time.Minute)
+	handler := RateLimitMiddleware(rl, false)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	for i, want := range []int{http.StatusOK, http.StatusTooManyRequests} {
+		req := httptest.NewRequest("POST", "/login", nil)
+		req.RemoteAddr = "10.0.0.1:1234"
+		// A fresh spoofed XFF per request must NOT mint a fresh bucket.
+		req.Header.Set("X-Forwarded-For", "1.2.3."+string(rune('0'+i)))
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Fatalf("request %d: expected %d, got %d", i+1, want, rec.Code)
+		}
+	}
+}
+
+func TestRateLimitUsesXFFWhenProxyTrusted(t *testing.T) {
+	rl := NewRateLimiter(1, time.Minute)
+	handler := RateLimitMiddleware(rl, true)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Same proxy RemoteAddr, distinct forwarded clients: both allowed.
+	for _, xff := range []string{"1.2.3.4", "5.6.7.8"} {
+		req := httptest.NewRequest("POST", "/login", nil)
+		req.RemoteAddr = "10.0.0.1:1234"
+		req.Header.Set("X-Forwarded-For", xff)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("xff %s: expected 200, got %d", xff, rec.Code)
+		}
+	}
+}
+
+func TestRateLimiterSweepsIdleKeys(t *testing.T) {
+	rl := NewRateLimiter(1, 10*time.Millisecond)
+	rl.Allow("idle-key")
+	time.Sleep(25 * time.Millisecond)
+	rl.Allow("other-key") // triggers the sweep
+
+	rl.mu.Lock()
+	_, exists := rl.entries["idle-key"]
+	rl.mu.Unlock()
+	if exists {
+		t.Fatal("expected idle-key to be swept from the entries map")
+	}
+}
+
+func TestLogoutClearsCookiesWithMatchingPaths(t *testing.T) {
+	h := testHandler(t)
+
+	req := httptest.NewRequest("POST", "/api/v1/auth/logout", nil)
+	rec := httptest.NewRecorder()
+	h.logout(rec, req)
+
+	paths := map[string]string{}
+	for _, c := range rec.Result().Cookies() {
+		paths[c.Name] = c.Path
+		if c.MaxAge >= 0 {
+			t.Fatalf("cookie %s: expected deletion (MaxAge<0), got %d", c.Name, c.MaxAge)
+		}
+	}
+	if paths["signmind_access"] != "/" {
+		t.Fatalf("signmind_access cleared with path %q, want /", paths["signmind_access"])
+	}
+	if paths["signmind_refresh"] != refreshCookiePath {
+		t.Fatalf("signmind_refresh cleared with path %q, want %q",
+			paths["signmind_refresh"], refreshCookiePath)
+	}
+}
+
+func TestCookieSecureFollowsRequestScheme(t *testing.T) {
+	h := testHandler(t)
+	_, _ = h.store.CreateUser("sec@example.com", "Password1", RoleUser)
+
+	login := func(forwardedProto string) []*http.Cookie {
+		var buf bytes.Buffer
+		_ = json.NewEncoder(&buf).Encode(loginRequest{Email: "sec@example.com", Password: "Password1"})
+		req := httptest.NewRequest("POST", "/api/v1/auth/login", &buf)
+		req.Header.Set("Content-Type", "application/json")
+		if forwardedProto != "" {
+			req.Header.Set("X-Forwarded-Proto", forwardedProto)
+		}
+		rec := httptest.NewRecorder()
+		h.login(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("login: expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+		return rec.Result().Cookies()
+	}
+
+	for _, c := range login("") {
+		if c.Secure {
+			t.Fatalf("cookie %s: Secure set on plain-HTTP request", c.Name)
+		}
+	}
+	for _, c := range login("https") {
+		if !c.Secure {
+			t.Fatalf("cookie %s: Secure missing on forwarded-HTTPS request", c.Name)
+		}
 	}
 }
 
