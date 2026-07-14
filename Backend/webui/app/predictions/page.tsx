@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import {
+  clearPredictions,
   fetchPredictions,
   formatTime,
   pct,
@@ -15,6 +16,8 @@ export default function PredictionsBrowserPage() {
   const [data, setData] = useState<PredictionsPage | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [clearing, setClearing] = useState<boolean>(false);
 
   // Filter & Pagination state
   const [wordFilter, setWordFilter] = useState<string>('');
@@ -22,6 +25,26 @@ export default function PredictionsBrowserPage() {
   const [offset, setOffset] = useState<number>(0);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [isStreaming, setIsStreaming] = useState<boolean>(true);
+
+  async function handleClearDatabase() {
+    if (!window.confirm('Are you sure you want to clear all prediction records from the database?')) {
+      return;
+    }
+    setClearing(true);
+    setNotice(null);
+    setError(null);
+    try {
+      await clearPredictions();
+      setNotice({ type: 'success', text: 'Prediction database cleared successfully.' });
+      setExpandedId(null);
+      setOffset(0);
+      await loadPredictions(activeWord, 0);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setClearing(false);
+    }
+  }
 
   async function loadPredictions(word: string, currentOffset: number, silent = false) {
     if (!silent) setLoading(true);
@@ -109,9 +132,23 @@ export default function PredictionsBrowserPage() {
           >
             {isStreaming ? 'Pause Stream' : 'Resume Stream'}
           </button>
+          <button
+            type="button"
+            className="secondary"
+            disabled={clearing}
+            onClick={handleClearDatabase}
+            style={{ borderColor: 'var(--status-critical)', color: 'var(--status-critical)' }}
+          >
+            {clearing ? 'Clearing...' : 'Clear Database'}
+          </button>
         </div>
       </div>
 
+      {notice && (
+        <div className={`notice ${notice.type}`}>
+          {notice.text}
+        </div>
+      )}
       {error && (
         <div className="notice error">
           Failed to load predictions: {error}

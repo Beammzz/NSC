@@ -69,6 +69,12 @@ Write-Host ''
 # Env consumed by backend/internal/config.
 $env:SIGNMIND_HTTP_ADDR = $HttpAddr
 $env:SIGNMIND_AI_ADDR   = $aiAddr
+# Sign-recording keypoint extractor (admin webui): the same x64 venv Python
+# (with MediaPipe) runs Inference_backend/extract_keypoints.py to turn an
+# uploaded clip into avatar frames. Unset -> recording uploads return 503
+# "keypoint extraction is not configured on this server".
+$env:SIGNMIND_KEYPOINT_PY    = $python
+$env:SIGNMIND_EXTRACT_SCRIPT = Join-Path $aiDir 'extract_keypoints.py'
 
 $procs = @()
 
@@ -107,7 +113,9 @@ finally {
     Write-Host ''
     Write-Step "shutting down..."
     Stop-All
-    Remove-Item Env:\SIGNMIND_HTTP_ADDR -ErrorAction SilentlyContinue
-    Remove-Item Env:\SIGNMIND_AI_ADDR   -ErrorAction SilentlyContinue
+    Remove-Item Env:\SIGNMIND_HTTP_ADDR      -ErrorAction SilentlyContinue
+    Remove-Item Env:\SIGNMIND_AI_ADDR        -ErrorAction SilentlyContinue
+    Remove-Item Env:\SIGNMIND_KEYPOINT_PY    -ErrorAction SilentlyContinue
+    Remove-Item Env:\SIGNMIND_EXTRACT_SCRIPT -ErrorAction SilentlyContinue
     Write-Step "stopped."
 }

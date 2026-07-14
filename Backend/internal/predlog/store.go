@@ -189,3 +189,11 @@ func (s *Store) Count() (int64, error) {
 	}
 	return n, nil
 }
+
+// Clear deletes all logged prediction records from the store.
+func (s *Store) Clear() error {
+	if _, err := s.db.Exec(`DELETE FROM predictions`); err != nil {
+		return fmt.Errorf("clearing predictions: %w", err)
+	}
+	return nil
+}

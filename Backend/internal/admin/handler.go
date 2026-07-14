@@ -53,6 +53,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/admin/status", h.status)
 	mux.HandleFunc("PUT /api/v1/admin/tuning", h.setTuning)
 	mux.HandleFunc("GET /api/v1/admin/predictions", h.predictions)
+	mux.HandleFunc("DELETE /api/v1/admin/predictions", h.clearPredictions)
 	mux.HandleFunc("POST /api/v1/admin/model", h.uploadModel)
 	mux.HandleFunc("GET /api/v1/admin/logs", h.logs)
 }
@@ -63,6 +64,7 @@ func (h *Handler) RegisterProtected(mux *http.ServeMux, mw func(http.Handler) ht
 	mux.Handle("GET /api/v1/admin/status", mw(http.HandlerFunc(h.status)))
 	mux.Handle("PUT /api/v1/admin/tuning", mw(http.HandlerFunc(h.setTuning)))
 	mux.Handle("GET /api/v1/admin/predictions", mw(http.HandlerFunc(h.predictions)))
+	mux.Handle("DELETE /api/v1/admin/predictions", mw(http.HandlerFunc(h.clearPredictions)))
 	mux.Handle("POST /api/v1/admin/model", mw(http.HandlerFunc(h.uploadModel)))
 	mux.Handle("GET /api/v1/admin/logs", mw(http.HandlerFunc(h.logs)))
 }
@@ -192,6 +194,15 @@ func (h *Handler) predictions(w http.ResponseWriter, r *http.Request) {
 		Total   int64            `json:"total"`
 		Records []predlog.Record `json:"records"`
 	}{Total: total, Records: records})
+}
+
+func (h *Handler) clearPredictions(w http.ResponseWriter, r *http.Request) {
+	if err := h.store.Clear(); err != nil {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusInternalServerError, "Failed to clear prediction log", err.Error()))
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ---- model upload ----

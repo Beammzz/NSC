@@ -46,6 +46,10 @@ a { color: inherit; text-decoration: none; }
   display: flex;
   flex-direction: column;
   gap: 4px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
 }
 .sidebar .brand {
   font-size: 16px;
@@ -181,10 +185,46 @@ tr.detail td { background: var(--surface-0); padding: 12px 16px 16px; }
 .logline .lvl.ERROR { color: var(--status-critical); }
 .logline .logger { color: var(--text-secondary); }
 
-/* ---- misc ---- */
-.notice { border-left: 3px solid var(--series-1); padding: 10px 14px; background: var(--surface-1); border-radius: 0 var(--radius) var(--radius) 0; color: var(--text-secondary); margin: 14px 0; }
-.notice.error { border-left-color: var(--status-critical); }
-.notice.success { border-left-color: var(--status-good); }
+/* ---- misc (floating system notification / toast) ---- */
+.notice {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9999;
+  min-width: 300px;
+  max-width: 440px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--series-1);
+  padding: 14px 18px;
+  background: var(--surface-1);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  margin: 0;
+  animation: noticeSlideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.notice ~ .notice {
+  bottom: 96px;
+}
+.notice ~ .notice ~ .notice {
+  bottom: 168px;
+}
+.notice.error {
+  border-left-color: var(--status-critical);
+}
+.notice.success {
+  border-left-color: var(--status-good);
+}
+@keyframes noticeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
 progress { width: 100%; max-width: 420px; accent-color: var(--series-1); }
 .empty { color: var(--text-muted); padding: 24px; text-align: center; }
 

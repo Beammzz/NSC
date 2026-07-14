@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -93,7 +94,6 @@ func main() {
 	// sends "Authorization: Bearer" — on the WS handshake for /stream.
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/stream", requireAuth(stream.NewHandler(aiClient, record)))
-	mux.Handle("/api/v1/conversation", requireAuth(http.HandlerFunc(conversation.Handler())))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -114,6 +114,17 @@ func main() {
 	if err := learn.Seed(learnStore); err != nil {
 		log.Fatalf("seeding learn content: %v", err)
 	}
+	// Conversation avatar signs the reply by stitching each gloss word's
+	// recorded keypoints from the shared dictionary library. The lookup keeps
+	// conversation decoupled from learn (it depends on a func, not the store).
+	signLookup := func(word string) (json.RawMessage, bool) {
+		sg, err := learnStore.GetSign(word)
+		if err != nil || len(sg.KeypointFrames) == 0 {
+			return nil, false
+		}
+		return sg.KeypointFrames, true
+	}
+	mux.Handle("/api/v1/conversation", requireAuth(http.HandlerFunc(conversation.Handler(signLookup))))
 	// Sign-recording keypoint extractor (admin webui). Unconfigured when the
 	// SIGNMIND_KEYPOINT_PY / SIGNMIND_EXTRACT_SCRIPT paths are unset — recording
 	// uploads then return 503, the rest of the learn API is unaffected.

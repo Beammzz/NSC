@@ -60,7 +60,44 @@ Verified: npm run build clean (/dictionary 4.48kB); live in browser (canvas getI
 filled + blue skeleton pixels, 0 transparent, after fix; was all (0,0,0,0) before). Files:
 Backend/webui/app/dictionary/page.tsx (+AvatarPreview/renderAvatarFrame/preview state),
 Backend/webui/lib/api.ts (+fetchSign, KeypointFrame/SignDetail types).
-NEXT: real-camera capture (user), then Phase 4 (gloss -> keypoint stitching in conversation).
+PHASE 4 DONE + UNIT-VERIFIED 2026-07-14: conversation avatar signs the reply by stitching each gloss
+word's recorded keypoint_frames from the shared dictionary library. conversation.Handler now takes a
+KeypointLookup (func(word)(json.RawMessage,bool)); buildReply -> stitchGloss (concatenate per-word
+frames, restGapFrames=3 hold between signs, missing/nil words skipped, empty => client procedural).
+Wired in main.go via signLookup over learnStore.GetSign (conversation stays decoupled: depends on the
+func, not the learn pkg). Files: Backend/internal/conversation/conversation.go + conversation_test.go
+(+StitchesGlossFrames, +NoRecordingsEmptyTransitions, fake lookup helpers), Backend/cmd/server/main.go;
+DOX: Backend/AGENTS.md conversation rows. Verified: `cd Backend && go vet ./... && go test ./...` all
+ok; conversation pkg 5/5 (stitch test asserts 2+gap3+3=8 frames, "พบ" skipped). Frontend already
+null/empty-safe (conversation_repository.dart guards `is List`; SignAvatar <7pts => procedural) — no
+frontend change needed. All Phase 4 work UNCOMMITTED.
+PHASE 4 LIVE (endpoint) VERIFIED 2026-07-14: dev.ps1 stack up (Python gRPC :50051 model-loaded 219
+classes; Go backend :8080, DB Backend/data/predictions.db, admin id=7 agent@example.com). curl:
+healthz 200; login agent@example.com/Agent123 200 (role admin); POST /api/v1/conversation {msg=hello}
+-> 200, reply_sign_gloss "สวัสดี พบ ยินดี", keypoint_transitions=0 frames — CORRECT: all 150 seeded
+signs have has_animation=false (0 recordings) so every gloss word is skipped -> empty -> client
+procedural fallback. A non-empty STITCHED sequence needs words with recordings (record-a-sign flow).
+RELEASE APK: flutter build apk --release -> build/app/outputs/flutter-apk/app-release.apk (46.9MB, exit
+0); adb install -r -> Success on Redmi Note 12 5G (sunstone); com.signmind.signmind v1.0.0 confirmed.
+App server URL for on-device test: ws://192.168.30.2:8080 (phone on same Wi-Fi); login agent creds or sign up.
+STILL UNVERIFIED (live): the Flutter app visibly animating a stitched *reply sentence* — needs a
+dictionary word carrying recorded frames (record via admin Dictionary page or the app), then the
+conversation avatar signs the reply stitched. Backend stitch logic itself is unit-proven (5/5).
+NEXT: user records signs on-device / admin, then observe stitched conversation avatar; DOX closeout per
+plan §6; commit when the user asks. Dev stack still running (bg task bw1d0ufh5).
+RECORDING-CONFIG FIX 2026-07-14: user hit "Recording unavailable: keypoint extraction is not configured
+on this server" (learn/handler.go:311 503) when recording. ROOT CAUSE: dev.ps1 exported only
+SIGNMIND_HTTP_ADDR/SIGNMIND_AI_ADDR, never SIGNMIND_KEYPOINT_PY/SIGNMIND_EXTRACT_SCRIPT -> config
+defaults them "" -> extractor.Configured()=false. NOT a code bug (the HTTP extract path was already E2E-
+proven line 38 with the vars set manually). FIX: dev.ps1 now exports SIGNMIND_KEYPOINT_PY=$python (the
+.venv-x64 interpreter, has mediapipe 0.10.35+cv2 5.0.0) + SIGNMIND_EXTRACT_SCRIPT=Inference_backend/
+extract_keypoints.py, and cleans them up in finally. .gitignore now ignores /Backend/{pose_landmarker_
+full,hand_landmarker}.task (extract_keypoints downloads ~16MB models into the backend cwd on first run).
+Verified after restart (new bg stack b03r3rw7q): same recording POST that was 503 -> now passes the gate
+(400 w/o file); full HTTP upload of a synthetic mp4 to throwaway word "zz_keypoint_test" -> 200
+has_animation:true, 12 frames stored, then DELETE 204 / GET 404 (dictionary left clean). Direct
+extract_keypoints run exit 0 (4 frames x 7 pts; models downloaded to Backend/, now gitignored). Files:
+dev.ps1, .gitignore. UNCOMMITTED. Old stack bw1d0ufh5 replaced by b03r3rw7q.
 
 ## Goal (current)
 Learning tab (2026-07-13): dictionary + Duolingo-style exercise roadmap, full stack.

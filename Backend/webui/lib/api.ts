@@ -133,6 +133,17 @@ export function fetchPredictions(params: {
   return getJSON<PredictionsPage>(`/api/v1/admin/predictions${qs ? `?${qs}` : ''}`);
 }
 
+export async function clearPredictions(): Promise<void> {
+  let resp = await fetch('/api/v1/admin/predictions', { method: 'DELETE' });
+  if (resp.status === 401) {
+    const refreshed = await tryRefresh();
+    if (refreshed) {
+      resp = await fetch('/api/v1/admin/predictions', { method: 'DELETE' });
+    }
+  }
+  if (!resp.ok) throw await asError(resp);
+}
+
 export async function putTuning(body: {
   confidence_threshold?: number;
   idle_min_frames_with_hands?: number;

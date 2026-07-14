@@ -201,6 +201,34 @@ func TestPredictionsFilterAndPaginate(t *testing.T) {
 	}
 }
 
+func TestClearPredictions(t *testing.T) {
+	srv, store := testServer(t, &fakeAI{}, config.EnvDev)
+	for i := 0; i < 3; i++ {
+		if err := store.Insert(predlog.Record{Seq: uint64(i), Word: "x"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	req, err := http.NewRequest(http.MethodDelete, srv.URL+"/api/v1/admin/predictions", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected 204 No Content, got %d", resp.StatusCode)
+	}
+	n, err := store.Count()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("expected 0 records after DELETE, got %d", n)
+	}
+}
+
 func multipartBody(t *testing.T, files map[string][]byte) (*bytes.Buffer, string) {
 	t.Helper()
 	var buf bytes.Buffer

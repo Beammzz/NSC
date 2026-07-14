@@ -32,8 +32,16 @@ type Response struct {
 	KeypointTransitions [][]LandmarkPoint `json:"keypoint_transitions"`
 }
 
+// KeypointLookup returns a gloss word's recorded avatar animation
+// (keypoint_frames JSON, shaped [][]LandmarkPoint) and whether one exists. It
+// is backed by the learn dictionary store, keeping this package decoupled from
+// learn (no import).
+type KeypointLookup func(word string) (json.RawMessage, bool)
+
 // Handler returns an http.HandlerFunc that serves POST /api/v1/conversation.
-func Handler() http.HandlerFunc {
+// lookup supplies each reply word's recorded keypoints for avatar stitching; a
+// nil lookup yields empty transitions (the client renders the procedural avatar).
+func Handler(lookup KeypointLookup) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			httpapi.WriteProblem(w, httpapi.NewProblem(http.StatusMethodNotAllowed, "Method Not Allowed", "POST required for /api/v1/conversation"))
@@ -52,7 +60,7 @@ func Handler() http.HandlerFunc {
 			return
 		}
 
-		resp := buildReply(msg)
+		resp := buildReply(msg, lookup)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -60,7 +68,7 @@ func Handler() http.HandlerFunc {
 	}
 }
 
-func buildReply(msg string) Response {
+func buildReply(msg string, lookup KeypointLookup) Response {
 	replyText := "สวัสดีค่ะ ยินดีที่ได้พบคุณค่ะ"
 	gloss := "สวัสดี พบ ยินดี"
 
@@ -72,20 +80,43 @@ func buildReply(msg string) Response {
 		gloss = "ยินดี ช่วยเหลือ"
 	}
 
-	transitions := [][]LandmarkPoint{
-		{
-			{X: 0.50, Y: 0.50, Z: 0.0},
-			{X: 0.48, Y: 0.45, Z: 0.0},
-		},
-		{
-			{X: 0.52, Y: 0.42, Z: 0.0},
-			{X: 0.50, Y: 0.50, Z: 0.0},
-		},
-	}
-
 	return Response{
 		ReplyText:           replyText,
 		ReplySignGloss:      gloss,
-		KeypointTransitions: transitions,
+		KeypointTransitions: stitchGloss(gloss, lookup),
 	}
+}
+
+// restGapFrames is the brief hold inserted between two stitched signs so the
+// words read as distinct rather than blurring into one continuous motion.
+const restGapFrames = 3
+
+// stitchGloss builds the reply's avatar sequence by concatenating each gloss
+// word's recorded keypoint frames from the shared dictionary library, holding
+// the previous sign's final frame for a short gap between words. Words with no
+// recorded animation (or a nil lookup) are skipped; when nothing matches the
+// result is empty and the client falls back to the procedural avatar.
+func stitchGloss(gloss string, lookup KeypointLookup) [][]LandmarkPoint {
+	out := [][]LandmarkPoint{}
+	if lookup == nil {
+		return out
+	}
+	for _, word := range strings.Fields(gloss) {
+		raw, ok := lookup(word)
+		if !ok || len(raw) == 0 {
+			continue
+		}
+		var frames [][]LandmarkPoint
+		if err := json.Unmarshal(raw, &frames); err != nil || len(frames) == 0 {
+			continue
+		}
+		if len(out) > 0 {
+			last := out[len(out)-1]
+			for i := 0; i < restGapFrames; i++ {
+				out = append(out, last)
+			}
+		}
+		out = append(out, frames...)
+	}
+	return out
 }

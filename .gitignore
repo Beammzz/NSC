@@ -295,6 +295,11 @@ venv.bak/
 .spyderproject
 .spyproject
 
+# MediaPipe models auto-downloaded by extract_keypoints.py into the backend's
+# working dir on the first sign recording (never source; ~16MB).
+/Backend/pose_landmarker_full.task
+/Backend/hand_landmarker.task
+
 # Rope project settings
 .ropeproject
 

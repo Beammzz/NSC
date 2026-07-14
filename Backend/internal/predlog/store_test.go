@@ -114,3 +114,22 @@ func TestListFiltersAndPagination(t *testing.T) {
 		t.Fatalf("expected count 5, got %d", n)
 	}
 }
+
+func TestClear(t *testing.T) {
+	store := openTemp(t)
+	for i := 0; i < 3; i++ {
+		if err := store.Insert(Record{Word: "test"}); err != nil {
+			t.Fatalf("Insert: %v", err)
+		}
+	}
+	if err := store.Clear(); err != nil {
+		t.Fatalf("Clear: %v", err)
+	}
+	n, err := store.Count()
+	if err != nil {
+		t.Fatalf("Count: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("expected count 0 after clear, got %d", n)
+	}
+}
