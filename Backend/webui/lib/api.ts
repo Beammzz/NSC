@@ -223,6 +223,12 @@ export type LearnSign = {
   has_animation: boolean;
 };
 
+// One landmark of an avatar keypoint frame (raw normalized image coords 0..1).
+export type KeypointFrame = { x: number; y: number; z: number };
+
+// A dictionary entry with its recorded animation, from the per-word endpoint.
+export type SignDetail = LearnSign & { keypoint_frames?: KeypointFrame[][] };
+
 async function sendJSON<T>(method: string, url: string, body?: unknown): Promise<T> {
   const init = (): RequestInit => ({
     method,
@@ -281,6 +287,54 @@ export function updateLearnExercise(
 
 export function deleteLearnExercise(id: number): Promise<void> {
   return sendJSON<void>('DELETE', `/api/v1/admin/learn/exercises/${id}`);
+}
+
+// ---- Dictionary sign admin API (admin) ----
+// These build the recorded keypoint library the avatar plays back. fetch/create/
+// delete go through sendJSON; the recording upload is multipart (webcam clip).
+
+export function fetchAdminSigns(): Promise<LearnSign[]> {
+  return getJSON<{ signs: LearnSign[] }>('/api/v1/admin/learn/signs').then((d) => d.signs);
+}
+
+// fetchSign returns one entry including its keypoint_frames animation (the
+// per-word dictionary endpoint), used to preview the avatar in the admin UI.
+export function fetchSign(word: string): Promise<SignDetail> {
+  return getJSON<SignDetail>(`/api/v1/learn/dictionary/${encodeURIComponent(word)}`);
+}
+
+export function createSign(word: string, category: string): Promise<{ word: string; category: string }> {
+  return sendJSON<{ word: string; category: string }>('POST', '/api/v1/admin/learn/signs', {
+    word,
+    category,
+  });
+}
+
+export function deleteSign(word: string): Promise<void> {
+  return sendJSON<void>('DELETE', `/api/v1/admin/learn/signs/${encodeURIComponent(word)}`);
+}
+
+// uploadSignRecording POSTs a recorded clip as multipart (field "recording");
+// the Go server execs the Python extractor and stores the keypoint frames. The
+// FormData is rebuilt per attempt so the one 401 refresh-retry can resend it.
+export async function uploadSignRecording(
+  word: string,
+  clip: Blob,
+  ext: string,
+): Promise<{ word: string; has_animation: boolean }> {
+  const url = `/api/v1/admin/learn/signs/${encodeURIComponent(word)}/recording`;
+  const send = () => {
+    const fd = new FormData();
+    fd.append('recording', clip, `recording.${ext}`);
+    return fetch(url, { method: 'POST', body: fd });
+  };
+  let resp = await send();
+  if (resp.status === 401) {
+    const refreshed = await tryRefresh();
+    if (refreshed) resp = await send();
+  }
+  if (!resp.ok) throw await asError(resp);
+  return (await resp.json()) as { word: string; has_animation: boolean };
 }
 
 // ---- User Management API (admin) ----

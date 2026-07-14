@@ -33,6 +33,8 @@ Flutter mobile client (Android 9+ / iOS 13+): real-time TSL scanner, AI sign-lan
 - Server IP Configuration: Configured directly on the Login Page (`LoginScreen`) before authenticating or entering demo mode. Settings Page displays the active server IP read-only with a shortcut back to `/login` to switch servers.
 - Real-time recognition streams feature vectors over WebSocket to `/api/v1/stream`; vector layout follows the root **Feature Vector Spec** — do not restate dimensions in frontend code comments, reference the spec.
 - Conversational AI and Speech Recognition use REST/WebSocket per root API rules.
+- Mobile Testing & Debugging: During testing or debugging, check `adb devices` for connected devices. If no device is connected, build an APK (`flutter build apk`) for the user to test instead.
+- Admin UI Access: Accessible via `http://127.0.0.1:8080` or `https://signmind.harumi.dev` (Agent credentials — email: `agent@example.com`, password: `Agent123`).
 - Every new feature ships with a corresponding test file (root Test Creation Mandate).
 - **Feature Introduction Registry Sync Rule**: After authentication or entering demo mode, the application routes to `/landing` (`LandingScreen`) which introduces all implemented SignMind AI features with interactive launch cards. Whenever a new feature is added or an existing feature is removed, developers MUST update `Frontend/lib/features/landing/presentation/screens/landing_screen.dart` alongside DOX (`AGENTS.md`) so the Landing Page remains synchronized as the single source of truth for implemented capabilities.
 

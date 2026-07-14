@@ -6,7 +6,7 @@ class AppSettings {
   final double confidenceThreshold;
   final String cameraResolution;
 
-  /// Base URL of the SignMind backend, e.g. `ws://10.0.2.2:8080`.
+  /// Base URL of the SignMind backend, e.g. `https://signmind.harumi.dev`.
   /// The stream service appends `/api/v1/stream`.
   final String serverUrl;
 
@@ -45,8 +45,8 @@ class AppSettings {
       hapticFeedback: true,
       confidenceThreshold: 0.85,
       cameraResolution: '720p',
-      // Android-emulator loopback to a backend on the host machine.
-      serverUrl: 'ws://10.0.2.2:8080',
+      // Production server default.
+      serverUrl: 'https://signmind.harumi.dev',
       useSimulatedStream: true,
       rememberCredentials: true,
       savedEmail: '',

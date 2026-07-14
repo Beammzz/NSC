@@ -102,6 +102,8 @@ repository split and are not yet rebuilt; recreate them under
 - Each feature lives in `Frontend/lib/features/<name>/` with its own `presentation/`, `domain/`, `data/` layers
 - Real-time recognition (scanner & tutor) extracts pose + hand landmarks locally and streams feature vectors via WebSocket to the Golang backend. The feature vector layout is defined in the Feature Vector Spec above — do not restate numbers here.
 - Conversational AI connects via REST/WebSocket API (`/api/v1/conversation`); Speech Recognition (STT) and Text-to-Speech (TTS) run on-device on the mobile client.
+- **Testing & Debugging Mandate**: During debugging or testing, check `adb devices` for connected devices. If no device is connected, build an APK (`flutter build apk`) for the user to test instead.
+- **Admin UI Access**: Accessible via `127.0.0.1:8080` or `signmind.harumi.dev` (Agent test credentials — email: `agent@example.com`, password: `Agent123`).
 - **Verification Mandate**: Whenever Flutter code is touched, the Agent MUST run `flutter analyze` and `flutter test`.
 - **Test Creation Mandate**: When developing a new feature, the Agent MUST create a corresponding test file so that future bug fixes cause less damage to production.
 - **Feature Introduction Registry Sync Mandate**: Every implemented feature in SignMind AI must be introduced with an interactive launch card on the Landing Page (`Frontend/lib/features/landing/presentation/screens/landing_screen.dart`). When adding or removing a feature, developers MUST update both the Landing Page feature registry and the DOX files (`AGENTS.md` and `Frontend/AGENTS.md`).
@@ -209,6 +211,8 @@ Before marking any task done:
 - Data split: always GroupShuffleSplit by session before augmentation
 - Model optimization: INT8 / FP16 quantization for server serving
 - Commit style: Conventional Commits
+- Mobile testing & debugging: check `adb devices` for connected devices; if none connected, build an APK for the user to test instead
+- Admin UI access: `127.0.0.1:8080` or `signmind.harumi.dev` (Agent email: `agent@example.com`, password: `Agent123`)
 
 ---
 

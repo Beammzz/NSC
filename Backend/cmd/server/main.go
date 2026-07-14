@@ -15,6 +15,7 @@ import (
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/auth"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/config"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/conversation"
+	"gitea.harumi.dev/Harumi/NSC/backend/internal/keypoint"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/learn"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/pb"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/predlog"
@@ -113,7 +114,11 @@ func main() {
 	if err := learn.Seed(learnStore); err != nil {
 		log.Fatalf("seeding learn content: %v", err)
 	}
-	learn.NewHandler(learnStore).RegisterProtected(mux, requireAuth, adminMW)
+	// Sign-recording keypoint extractor (admin webui). Unconfigured when the
+	// SIGNMIND_KEYPOINT_PY / SIGNMIND_EXTRACT_SCRIPT paths are unset — recording
+	// uploads then return 503, the rest of the learn API is unaffected.
+	extractor := keypoint.New(cfg.KeypointPython, cfg.ExtractScript, 0)
+	learn.NewHandler(learnStore, extractor).RegisterProtected(mux, requireAuth, adminMW)
 
 	// Static webui served at / (API routes win by mux specificity).
 	mux.Handle("/", webui.Handler())

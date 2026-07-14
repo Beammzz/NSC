@@ -40,6 +40,7 @@ void main() {
     // Verify Server IP text form field is visible and editable
     final urlField = find.byKey(const Key('loginServerUrlField'));
     expect(urlField, findsOneWidget);
+    expect(find.text('https://signmind.harumi.dev'), findsWidgets);
     await tester.enterText(urlField, 'ws://192.168.1.100:8080');
     expect(find.text('ws://192.168.1.100:8080'), findsOneWidget);
   });

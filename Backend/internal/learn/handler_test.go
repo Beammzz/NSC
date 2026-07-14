@@ -1,7 +1,11 @@
 package learn
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,9 +14,36 @@ import (
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/auth"
 )
 
+// fakeExtractor stands in for *keypoint.Extractor so handler tests need no
+// Python runtime. It records what it was handed and returns canned frames.
+type fakeExtractor struct {
+	configured bool
+	frames     json.RawMessage
+	err        error
+	gotExt     string
+	gotBytes   int
+}
+
+func (f *fakeExtractor) Configured() bool { return f.configured }
+
+func (f *fakeExtractor) ExtractReader(_ context.Context, r io.Reader, ext string) (json.RawMessage, error) {
+	f.gotExt = ext
+	b, _ := io.ReadAll(r)
+	f.gotBytes = len(b)
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.frames, nil
+}
+
 // testServer wires the learn handler behind the real JWT middleware stack,
-// mirroring cmd/server/main.go, and returns ready Bearer tokens.
+// mirroring cmd/server/main.go, with a configured fake extractor.
 func testServer(t *testing.T) (srv *httptest.Server, userToken, adminToken string, store *Store) {
+	return testServerExt(t, &fakeExtractor{configured: true})
+}
+
+// testServerExt is testServer with an explicit extractor, for recording tests.
+func testServerExt(t *testing.T, ext KeypointExtractor) (srv *httptest.Server, userToken, adminToken string, store *Store) {
 	t.Helper()
 	store = testStore(t)
 	if err := Seed(store); err != nil {
@@ -29,7 +60,7 @@ func testServer(t *testing.T) (srv *httptest.Server, userToken, adminToken strin
 	}
 
 	mux := http.NewServeMux()
-	NewHandler(store).RegisterProtected(mux, requireAuth, adminMW)
+	NewHandler(store, ext).RegisterProtected(mux, requireAuth, adminMW)
 	srv = httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
@@ -42,6 +73,46 @@ func testServer(t *testing.T) (srv *httptest.Server, userToken, adminToken strin
 		t.Fatalf("generating admin token: %v", err)
 	}
 	return srv, userToken, adminToken, store
+}
+
+// doMultipartRecording POSTs a multipart form with optional text fields and an
+// optional file part (fileField == "" omits the file).
+func doMultipartRecording(t *testing.T, url, token string, fields map[string]string,
+	fileField, filename string, fileBytes []byte) *http.Response {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	for k, v := range fields {
+		if err := mw.WriteField(k, v); err != nil {
+			t.Fatalf("writing field %q: %v", k, err)
+		}
+	}
+	if fileField != "" {
+		fw, err := mw.CreateFormFile(fileField, filename)
+		if err != nil {
+			t.Fatalf("creating file part: %v", err)
+		}
+		if _, err := fw.Write(fileBytes); err != nil {
+			t.Fatalf("writing file part: %v", err)
+		}
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatalf("closing multipart: %v", err)
+	}
+	req, err := http.NewRequest("POST", url, &buf)
+	if err != nil {
+		t.Fatalf("building request: %v", err)
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST %s: %v", url, err)
+	}
+	t.Cleanup(func() { resp.Body.Close() })
+	return resp
 }
 
 func doJSON(t *testing.T, method, url, token, body string) *http.Response {
@@ -226,6 +297,93 @@ func TestAdminCRUD(t *testing.T) {
 	}
 	if resp := doJSON(t, "DELETE", srv.URL+"/api/v1/admin/learn/topics/"+jsonInt(topic.ID), adminToken, ""); resp.StatusCode != http.StatusNotFound {
 		t.Errorf("double delete: status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestAdminSignsUpsertAndDelete(t *testing.T) {
+	srv, userToken, adminToken, store := testServer(t)
+
+	// Non-admin is refused.
+	if resp := doJSON(t, "POST", srv.URL+"/api/v1/admin/learn/signs", userToken,
+		`{"word":"x"}`); resp.StatusCode != http.StatusForbidden {
+		t.Errorf("user upsert: status = %d, want 403", resp.StatusCode)
+	}
+
+	resp := doJSON(t, "POST", srv.URL+"/api/v1/admin/learn/signs", adminToken,
+		`{"word": "ทดสอบ", "category": "หมวดทดสอบ"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("upsert sign: status = %d, want 200", resp.StatusCode)
+	}
+	sg, err := store.GetSign("ทดสอบ")
+	if err != nil || sg.Category != "หมวดทดสอบ" {
+		t.Fatalf("sign not stored: %+v err=%v", sg, err)
+	}
+
+	// Empty word rejected.
+	if resp := doJSON(t, "POST", srv.URL+"/api/v1/admin/learn/signs", adminToken,
+		`{"category":"x"}`); resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("empty word: status = %d, want 400", resp.StatusCode)
+	}
+
+	if resp := doJSON(t, "DELETE", srv.URL+"/api/v1/admin/learn/signs/ทดสอบ", adminToken, ""); resp.StatusCode != http.StatusNoContent {
+		t.Errorf("delete sign: status = %d, want 204", resp.StatusCode)
+	}
+	if resp := doJSON(t, "DELETE", srv.URL+"/api/v1/admin/learn/signs/ทดสอบ", adminToken, ""); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("double delete: status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestAdminSignRecording(t *testing.T) {
+	fx := &fakeExtractor{configured: true, frames: json.RawMessage(`[[{"x":0.1,"y":0.2,"z":0}]]`)}
+	srv, _, adminToken, store := testServerExt(t, fx)
+
+	// A category on the form auto-creates the sign, so this records a brand-new word.
+	resp := doMultipartRecording(t, srv.URL+"/api/v1/admin/learn/signs/สวัสดี/recording", adminToken,
+		map[string]string{"category": "ทักทาย"}, "recording", "clip.webm", []byte("fake video bytes"))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("recording: status = %d, want 200", resp.StatusCode)
+	}
+	if fx.gotExt != ".webm" {
+		t.Errorf("extractor ext = %q, want .webm", fx.gotExt)
+	}
+	if fx.gotBytes == 0 {
+		t.Error("extractor received no upload bytes")
+	}
+	sg, err := store.GetSign("สวัสดี")
+	if err != nil {
+		t.Fatalf("get sign: %v", err)
+	}
+	if !sg.HasAnimation || string(sg.KeypointFrames) != `[[{"x":0.1,"y":0.2,"z":0}]]` {
+		t.Errorf("frames not stored on sign: %+v", sg)
+	}
+}
+
+func TestAdminSignRecordingUnconfigured(t *testing.T) {
+	srv, _, adminToken, _ := testServerExt(t, &fakeExtractor{configured: false})
+	resp := doMultipartRecording(t, srv.URL+"/api/v1/admin/learn/signs/สวัสดี/recording", adminToken,
+		nil, "recording", "clip.webm", []byte("bytes"))
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("unconfigured extractor: status = %d, want 503", resp.StatusCode)
+	}
+}
+
+func TestAdminSignRecordingMissingFile(t *testing.T) {
+	srv, _, adminToken, _ := testServer(t)
+	resp := doMultipartRecording(t, srv.URL+"/api/v1/admin/learn/signs/สวัสดี/recording", adminToken,
+		map[string]string{"category": "ทักทาย"}, "", "", nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("missing file part: status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestAdminSignRecordingUnknownWordNoCategory(t *testing.T) {
+	fx := &fakeExtractor{configured: true, frames: json.RawMessage(`[[{"x":0,"y":0,"z":0}]]`)}
+	srv, _, adminToken, _ := testServerExt(t, fx)
+	// No category + a word absent from the dictionary -> create the sign first.
+	resp := doMultipartRecording(t, srv.URL+"/api/v1/admin/learn/signs/ไม่มีคำนี้เลย/recording", adminToken,
+		nil, "recording", "clip.webm", []byte("bytes"))
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("unknown word without category: status = %d, want 404", resp.StatusCode)
 	}
 }
 

@@ -39,6 +39,14 @@ type Config struct {
 	// Enable ONLY when the server runs behind a reverse proxy that strips
 	// client-supplied values; otherwise rate limits are spoofable.
 	TrustProxy bool
+
+	// KeypointPython is the x64 Python interpreter (with MediaPipe installed)
+	// used to extract avatar keypoints from admin sign recordings. Empty
+	// disables recording uploads (they return 503).
+	KeypointPython string
+	// ExtractScript is the path to Inference_backend/extract_keypoints.py.
+	// Empty disables recording uploads.
+	ExtractScript string
 }
 
 func (c Config) IsDev() bool { return c.Env == EnvDev }
@@ -73,6 +81,9 @@ func load(fileVars map[string]string) Config {
 		AdminPassword: get("SIGNMIND_ADMIN_PASSWORD", ""),
 		AllowSignup:   strings.EqualFold(get("SIGNMIND_ALLOW_SIGNUP", "true"), "true"),
 		TrustProxy:    strings.EqualFold(get("SIGNMIND_TRUST_PROXY", "false"), "true"),
+
+		KeypointPython: get("SIGNMIND_KEYPOINT_PY", ""),
+		ExtractScript:  get("SIGNMIND_EXTRACT_SCRIPT", ""),
 	}
 }
 

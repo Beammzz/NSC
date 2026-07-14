@@ -10,6 +10,7 @@ const links = [
   { href: '/logs/', label: 'AI Logs' },
   { href: '/upload/', label: 'Upload Model' },
   { href: '/learn/', label: 'Learning' },
+  { href: '/dictionary/', label: 'Dictionary' },
   { href: '/users/', label: 'Users' },
 ];
 

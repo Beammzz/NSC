@@ -250,7 +250,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                               fontSize: 14,
                             ),
                             decoration: InputDecoration(
-                              hintText: 'ws://10.0.2.2:8080',
+                              hintText: 'https://signmind.harumi.dev',
                               hintStyle: TextStyle(
                                 color: AppTheme.textMutedDark.withAlpha(150),
                                 fontFamily: 'monospace',

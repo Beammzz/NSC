@@ -5,8 +5,9 @@ import 'package:signmind/features/scanner/domain/models/scanner_models.dart';
 
 /// Skeletal avatar that loops through keypoint animation frames (the
 /// `keypoint_frames` of a dictionary entry, or the conversation endpoint's
-/// keypoint_transitions). When [frames] is null or empty — no animation
-/// data exists for the word yet — it plays a procedural signing-figure
+/// keypoint_transitions). When [frames] is null, empty, or too sparse to
+/// draw a figure — a renderable frame needs the 7 pose points, so the 2-point
+/// server stub falls here too — it plays a procedural signing-figure
 /// placeholder derived from [word] so every entry still demonstrates
 /// "hands moving in front of an upper body".
 class SignAvatar extends StatefulWidget {
@@ -47,7 +48,10 @@ class _SignAvatarState extends State<SignAvatar>
   @override
   Widget build(BuildContext context) {
     final frames = widget.frames;
-    final hasData = frames != null && frames.isNotEmpty;
+    // A frame needs the 7 pose points to render as a signing figure; sparser
+    // data (e.g. the 2-point conversation stub) falls back to procedural.
+    final hasData =
+        frames != null && frames.isNotEmpty && frames.first.length >= 7;
     return SizedBox(
       width: widget.size,
       height: widget.size,

@@ -44,6 +44,8 @@ Row matched: write `TRIGGER: <event> -> <doc>`; your next tool call is Read on t
 - Backend → AI inference: gRPC bidirectional streaming (no HTTP fallback on landmark path)
 - Error responses: RFC 7807 (Problem Details)
 - Read AGENTS.md hierarchy (root + child DOX) before editing any subtree
+- Mobile testing & debugging: Check `adb devices` for connected devices; if none connected, build an APK (`flutter build apk`) for the user to test instead
+- Admin UI access: `127.0.0.1:8080` or `signmind.harumi.dev` (Agent credentials — email: `agent@example.com`, password: `Agent123`)
 
 <!-- BEGIN KIT FOOTER v1.0 -->
 ## Hard stops

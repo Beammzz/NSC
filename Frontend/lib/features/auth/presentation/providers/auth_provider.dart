@@ -11,7 +11,7 @@ class AuthNotifier extends Notifier<AuthState> {
     return const AuthState();
   }
 
-  /// Converts a WebSocket/HTTP Server URL (e.g. ws://10.0.2.2:8080) to HTTP base URL.
+  /// Converts a WebSocket/HTTP Server URL (e.g. https://signmind.harumi.dev) to HTTP base URL.
   String _toHttpUrl(String wsOrHttpUrl) {
     var trimmed = wsOrHttpUrl.trim();
     if (trimmed.startsWith('wss://')) {

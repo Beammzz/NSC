@@ -1,5 +1,67 @@
 # State
 
+## Active goal (2026-07-13): Sign Example via Avatar
+Plan of record: docs/plans/sign-avatar-pipeline.md (4 phases — other agents read that first).
+Locked: Go-exec Python CLI for keypoint extraction; in-browser webcam recording in admin webui;
+conversation avatar signs by stitching recorded per-word keypoints; conversation transcript
+hidden by default with per-message reveal.
+PHASE 1 DONE (verified 2026-07-13): AI conversation replies now lead with SignAvatar; text +
+gloss hidden until "แสดงข้อความ" is tapped. SignAvatar treats <7-point frames (the 2-point
+server stub) as procedural. Files: conversation_screen.dart (_AiMessageBubble), sign_avatar.dart;
+tests: new test/features/conversation/conversation_screen_test.dart + updated the older
+presentation/conversation_screen_test.dart to the new UX. Verified: flutter analyze clean,
+flutter test 55/55. Uncommitted.
+PHASE 2 CODE DONE + UNIT-VERIFIED (2026-07-13): env risk cleared — .venv-x64 is Python 3.12 x64;
+`pip install --dry-run mediapipe opencv-python-headless` resolves cleanly (mediapipe 0.10.35, no
+numpy downgrade). Built: Inference_backend/extract_keypoints.py (pure helpers landmarks_to_frame/
+downsample + deferred cv2/mediapipe extract()); Backend/internal/keypoint (Extractor execs the CLI
+via injectable Runner; ExtractReader temp-file lifecycle; validateFrames); learn store
+UpsertSign/SetKeypointFrames/DeleteSign; learn admin sign endpoints (GET/POST /admin/learn/signs,
+POST .../signs/{word}/recording, DELETE .../signs/{word}) behind a KeypointExtractor interface;
+config SIGNMIND_KEYPOINT_PY + SIGNMIND_EXTRACT_SCRIPT; wired in main.go. Verified: go vet/test all
+green; ruff clean, pytest 60. Uncommitted.
+PHASE 2 LIVE (synthetic) VERIFIED 2026-07-13: installed mediapipe 0.10.35 + opencv-python-headless
+5.0.0 into .venv-x64 (numpy stayed 2.5.1). Ran extract_keypoints.py on a synthetic mp4 exactly as
+Go execs it -> exit 0, MediaPipe loaded, stdout clean JSON (no BOM), 8 frames x 7 pose points,
+{x,y,z} keys. Plumbing proven. NOTE: extract_keypoints downloads the MediaPipe .task models into
+cwd on first run — in production that's the Go server's cwd (Backend/); consider downloading beside
+the script or into TSL_Output (Phase 2 refinement, NOT done).
+STILL UNVERIFIED: real-human-clip extraction QUALITY (deferred to Phase 3 webcam) and the full HTTP
+path (multipart -> handler -> real extractor -> store) end-to-end.
+PHASE 3 CODE DONE + BUILD-VERIFIED 2026-07-14: admin webui dictionary page. Files: Backend/webui/
+app/dictionary/page.tsx (new — list signs with has_animation badge; create sign; SignRecorder
+inlined = getUserMedia -> MediaRecorder -> preview -> upload; delete), Backend/webui/lib/api.ts
+(+fetchAdminSigns/createSign/deleteSign/uploadSignRecording; recording is multipart field
+"recording", FormData rebuilt per attempt for the 401 refresh-retry), Backend/webui/components/
+nav.tsx (+Dictionary link; plan said layout.tsx but nav lives in components/nav.tsx). Verified:
+`cd Backend/webui && npm run build` -> 11/11 static pages, /dictionary emitted, copy-dist ok.
+COMBINED HTTP E2E VERIFIED 2026-07-14 (server-side, synthetic clip): built signmind-e2e.exe, ran it
+from the scratchpad cwd (reuses cached .task models) with SIGNMIND_KEYPOINT_PY=.venv-x64 python +
+SIGNMIND_EXTRACT_SCRIPT=extract_keypoints.py. Python E2E client (scratchpad/e2e_client.py) exercised:
+login 200 -> create sign (Thai "สวัสดี" round-trips in JSON body AND %-encoded {word} path) 200 ->
+POST .../signs/สวัสดี/recording with an mp4 (200, server exec'd real MediaPipe in 11.1s) -> GET
+dictionary returns keypoint_frames (16 frames x 7 pts) -> repeat with a webm (200, 6.5s) -> frames
+returned. has_animation flips false->true. So the FULL PLUMBING is proven end-to-end through the
+running server, and opencv DECODES a VP8 webm (the MediaRecorder container) — the open WebM risk is
+CLEARED. Repo not polluted (models stayed in scratchpad; the .task files in Frontend/android are the
+pre-existing mobile assets). Note: the server binary embeds the freshly-built webui incl. /dictionary.
+STILL UNVERIFIED: real-person landmark QUALITY. The synthetic clip zero-fills pose (any_nonzero_coord
+=False) because MediaPipe finds no body — expected. Only a real camera clip of a person signing can
+prove non-zero, correctly-ordered coords. Path to close it: open http://127.0.0.1:8099 (localhost =
+secure context, so getUserMedia works), log in agent@example.com/Agent123, Dictionary -> Record.
+PHASE 3 ADDITION 2026-07-14: "Show animation" preview on the dictionary page. Per-row toggle (only
+when has_animation) fetches the sign's keypoint_frames (new api.ts fetchSign -> GET /learn/dictionary/
+{word}) and plays them on a <canvas> via AvatarPreview — a faithful port of Flutter's
+_SignAvatarPainter (7-pose layout, connections [[1,2],[1,3],[3,5],[2,4],[4,6]], head circle, hand
+dots, 2400ms loop, #3987e5 accent). BUGFIX during verify: AvatarPreview scheduled the first paint
+only inside requestAnimationFrame, which browsers pause while the tab is hidden -> blank canvas;
+fixed by painting frame 0 synchronously in the effect, then rAF drives animation when visible.
+Verified: npm run build clean (/dictionary 4.48kB); live in browser (canvas getImageData: bg #121211
+filled + blue skeleton pixels, 0 transparent, after fix; was all (0,0,0,0) before). Files:
+Backend/webui/app/dictionary/page.tsx (+AvatarPreview/renderAvatarFrame/preview state),
+Backend/webui/lib/api.ts (+fetchSign, KeypointFrame/SignDetail types).
+NEXT: real-camera capture (user), then Phase 4 (gloss -> keypoint stitching in conversation).
+
 ## Goal (current)
 Learning tab (2026-07-13): dictionary + Duolingo-style exercise roadmap, full stack.
 User decisions: full stack now; dictionary shows avatar keypoint animation (procedural

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:signmind/features/conversation/presentation/screens/conversation_screen.dart';
+import 'package:signmind/features/learn/presentation/widgets/sign_avatar.dart';
 import 'package:signmind/features/settings/presentation/providers/settings_provider.dart';
 
 Future<ProviderContainer> makeContainer() async {
@@ -43,11 +44,21 @@ void main() {
     // Verify user bubble appears immediately
     expect(find.text('สวัสดี'), findsOneWidget);
 
-    // Pump past the SimulatedConversationRepository 600ms delay
-    await tester.pumpAndSettle(const Duration(seconds: 1));
+    // Advance fake time past the repository's 600ms delay and the follow-on
+    // TTS timer. The AI bubble's SignAvatar animates forever, so we step time
+    // with pump(duration) instead of pumpAndSettle (which would never settle).
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(seconds: 1));
 
-    // Verify AI reply bubble and sign gloss appear
+    // The AI reply now leads with the signing avatar; the transcript and gloss
+    // stay hidden until the user reveals them (Phase 1 conversation UX).
     expect(find.text('SignMind AI'), findsOneWidget);
+    expect(find.byType(SignAvatar), findsOneWidget);
+    expect(find.textContaining('คำศัพท์ภาษามือ:'), findsNothing);
+
+    // Revealing the transcript surfaces the sign gloss.
+    await tester.tap(find.text('แสดงข้อความ'));
+    await tester.pump();
     expect(find.textContaining('คำศัพท์ภาษามือ:'), findsOneWidget);
   });
 }

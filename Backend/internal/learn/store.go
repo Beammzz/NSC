@@ -312,6 +312,41 @@ func (s *Store) GetSign(word string) (Sign, error) {
 	return sg, nil
 }
 
+// UpsertSign creates or updates a dictionary entry's word + category, leaving
+// any existing keypoint_frames untouched (the admin sign editor flow).
+func (s *Store) UpsertSign(word, category string) error {
+	_, err := s.db.Exec(`
+INSERT INTO learn_signs (word, category) VALUES (?, ?)
+ON CONFLICT (word) DO UPDATE SET category = excluded.category`,
+		word, category)
+	if err != nil {
+		return fmt.Errorf("upserting sign: %w", err)
+	}
+	return nil
+}
+
+// SetKeypointFrames stores the avatar animation JSON for an existing sign
+// (extracted from a recorded clip). The row must already exist — create it
+// with UpsertSign first; a missing word yields ErrNotFound.
+func (s *Store) SetKeypointFrames(word string, frames json.RawMessage) error {
+	res, err := s.db.Exec(
+		`UPDATE learn_signs SET keypoint_frames = ? WHERE word = ?`,
+		string(frames), word)
+	if err != nil {
+		return fmt.Errorf("setting keypoint frames: %w", err)
+	}
+	return checkFound(res)
+}
+
+// DeleteSign removes a dictionary entry.
+func (s *Store) DeleteSign(word string) error {
+	res, err := s.db.Exec(`DELETE FROM learn_signs WHERE word = ?`, word)
+	if err != nil {
+		return fmt.Errorf("deleting sign: %w", err)
+	}
+	return checkFound(res)
+}
+
 // ---- progress ----
 
 // ListProgress returns the user's progress rows.

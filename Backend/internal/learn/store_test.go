@@ -2,6 +2,7 @@ package learn
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -198,5 +199,48 @@ func TestGetSignFrames(t *testing.T) {
 
 	if _, err := s.GetSign("ไม่มีคำนี้"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("missing sign: err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestSignWriteMethods(t *testing.T) {
+	s := testStore(t)
+
+	// Upsert creates the row; a second upsert updates category but must not
+	// wipe frames set in between.
+	if err := s.UpsertSign("กิน", "กริยา"); err != nil {
+		t.Fatalf("upsert create: %v", err)
+	}
+	frames := json.RawMessage(`[[{"x":0.5,"y":0.5,"z":0}]]`)
+	if err := s.SetKeypointFrames("กิน", frames); err != nil {
+		t.Fatalf("set frames: %v", err)
+	}
+	if err := s.UpsertSign("กิน", "การกระทำ"); err != nil {
+		t.Fatalf("upsert update: %v", err)
+	}
+	sg, err := s.GetSign("กิน")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if sg.Category != "การกระทำ" {
+		t.Errorf("category = %q, want การกระทำ", sg.Category)
+	}
+	if !sg.HasAnimation || string(sg.KeypointFrames) != string(frames) {
+		t.Errorf("frames not preserved across upsert: %+v", sg)
+	}
+
+	// Setting frames on a missing sign is a not-found (create it first).
+	if err := s.SetKeypointFrames("ไม่มี", frames); !errors.Is(err, ErrNotFound) {
+		t.Errorf("set frames on missing sign: err = %v, want ErrNotFound", err)
+	}
+
+	// Delete removes it; a second delete is a not-found.
+	if err := s.DeleteSign("กิน"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, err := s.GetSign("กิน"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("sign should be gone, err = %v", err)
+	}
+	if err := s.DeleteSign("กิน"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("double delete: err = %v, want ErrNotFound", err)
 	}
 }

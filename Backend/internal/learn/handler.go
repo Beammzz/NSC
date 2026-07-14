@@ -1,12 +1,16 @@
 package learn
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/auth"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/httpapi"
@@ -31,13 +35,36 @@ import (
 //	POST   /api/v1/admin/learn/exercises      create exercise
 //	PUT    /api/v1/admin/learn/exercises/{id} update exercise (incl. pass_confidence)
 //	DELETE /api/v1/admin/learn/exercises/{id} delete exercise
-type Handler struct {
-	store *Store
+//	GET    /api/v1/admin/learn/signs               all dictionary entries (no frames)
+//	POST   /api/v1/admin/learn/signs               upsert a sign (word + category)
+//	POST   /api/v1/admin/learn/signs/{word}/recording  extract keypoints from an uploaded clip
+//	DELETE /api/v1/admin/learn/signs/{word}        delete a sign
+const (
+	// Multipart parse memory threshold for a sign recording; larger spools to disk.
+	recordingMemoryBytes = 8 << 20
+	// Hard cap on a recording upload.
+	maxRecordingBytes = 100 << 20
+	// Budget for the whole extraction (upload copy + Python MediaPipe pass).
+	recordingTimeout = 90 * time.Second
+)
+
+// KeypointExtractor turns an uploaded clip into avatar keypoint-frame JSON.
+// Implemented by *keypoint.Extractor; an interface here keeps learn decoupled
+// from the extraction runtime and trivially fakeable in tests.
+type KeypointExtractor interface {
+	Configured() bool
+	ExtractReader(ctx context.Context, r io.Reader, ext string) (json.RawMessage, error)
 }
 
-// NewHandler builds the learn API handler over the given store.
-func NewHandler(store *Store) *Handler {
-	return &Handler{store: store}
+type Handler struct {
+	store     *Store
+	extractor KeypointExtractor
+}
+
+// NewHandler builds the learn API handler over the given store. extractor may
+// be unconfigured (recording uploads then return 503); it is never nil.
+func NewHandler(store *Store, extractor KeypointExtractor) *Handler {
+	return &Handler{store: store, extractor: extractor}
 }
 
 // RegisterProtected wires the app routes behind userMW (any authenticated
@@ -60,6 +87,11 @@ func (h *Handler) RegisterProtected(mux *http.ServeMux, userMW, adminMW func(htt
 	mux.Handle("POST /api/v1/admin/learn/exercises", admin(h.createExercise))
 	mux.Handle("PUT /api/v1/admin/learn/exercises/{id}", admin(h.updateExercise))
 	mux.Handle("DELETE /api/v1/admin/learn/exercises/{id}", admin(h.deleteExercise))
+
+	mux.Handle("GET /api/v1/admin/learn/signs", admin(h.adminSigns))
+	mux.Handle("POST /api/v1/admin/learn/signs", admin(h.upsertSign))
+	mux.Handle("POST /api/v1/admin/learn/signs/{word}/recording", admin(h.uploadSignRecording))
+	mux.Handle("DELETE /api/v1/admin/learn/signs/{word}", admin(h.deleteSign))
 }
 
 // ---- app endpoints ----
@@ -225,6 +257,115 @@ func (h *Handler) deleteExercise(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.store.DeleteExercise(id); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---- admin dictionary / signs ----
+
+func (h *Handler) adminSigns(w http.ResponseWriter, r *http.Request) {
+	signs, err := h.store.ListSigns()
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"signs": signs})
+}
+
+func (h *Handler) upsertSign(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Word     string `json:"word"`
+		Category string `json:"category"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusBadRequest, "Malformed sign body", err.Error()))
+		return
+	}
+	body.Word = strings.TrimSpace(body.Word)
+	body.Category = strings.TrimSpace(body.Category)
+	if body.Word == "" {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusBadRequest, "Invalid sign", "word is required"))
+		return
+	}
+	if err := h.store.UpsertSign(body.Word, body.Category); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"word": body.Word, "category": body.Category})
+}
+
+// uploadSignRecording extracts avatar keypoints from an uploaded clip and
+// stores them on the sign. An optional "category" form field upserts the sign
+// first, so a recording can create a brand-new dictionary entry in one step.
+func (h *Handler) uploadSignRecording(w http.ResponseWriter, r *http.Request) {
+	word := strings.TrimSpace(r.PathValue("word"))
+	if word == "" {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusBadRequest, "Invalid sign", "word is required"))
+		return
+	}
+	if !h.extractor.Configured() {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusServiceUnavailable, "Recording unavailable",
+			"keypoint extraction is not configured on this server"))
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRecordingBytes)
+	if err := r.ParseMultipartForm(recordingMemoryBytes); err != nil {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusBadRequest, "Malformed multipart upload", err.Error()))
+		return
+	}
+	defer r.MultipartForm.RemoveAll()
+
+	// Optional category: create/refresh the sign row before storing frames.
+	if category := strings.TrimSpace(r.FormValue("category")); category != "" {
+		if err := h.store.UpsertSign(word, category); err != nil {
+			writeStoreError(w, err)
+			return
+		}
+	}
+
+	file, header, err := r.FormFile("recording")
+	if err != nil {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusBadRequest, "Missing recording",
+			`form field "recording" (the video clip) is required`))
+		return
+	}
+	defer file.Close()
+
+	ctx, cancel := context.WithTimeout(r.Context(), recordingTimeout)
+	defer cancel()
+	frames, err := h.extractor.ExtractReader(ctx, file, filepath.Ext(header.Filename))
+	if err != nil {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusUnprocessableEntity, "Keypoint extraction failed", err.Error()))
+		return
+	}
+
+	if err := h.store.SetKeypointFrames(word, frames); err != nil {
+		// ErrNotFound here means the sign row doesn't exist and no category was
+		// supplied to create it.
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"word": word, "has_animation": true})
+}
+
+func (h *Handler) deleteSign(w http.ResponseWriter, r *http.Request) {
+	word := strings.TrimSpace(r.PathValue("word"))
+	if word == "" {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusBadRequest, "Invalid sign", "word is required"))
+		return
+	}
+	if err := h.store.DeleteSign(word); err != nil {
 		writeStoreError(w, err)
 		return
 	}

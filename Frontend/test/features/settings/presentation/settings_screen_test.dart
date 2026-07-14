@@ -42,6 +42,7 @@ void main() {
     // Verify default state in Riverpod provider
     expect(container.read(settingsProvider).isDarkMode, isTrue);
     expect(container.read(settingsProvider).autoSpeak, isTrue);
+    expect(container.read(settingsProvider).serverUrl, 'https://signmind.harumi.dev');
 
     // Toggle Auto TTS switch
     final autoSpeakFinder = find.text('อ่านออกเสียงอัตโนมัติ (Auto TTS)');

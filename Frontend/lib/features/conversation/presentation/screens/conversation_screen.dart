@@ -4,6 +4,7 @@ import 'package:signmind/core/services/tts_service.dart';
 import 'package:signmind/core/theme/app_theme.dart';
 import 'package:signmind/features/conversation/domain/models/conversation_models.dart';
 import 'package:signmind/features/conversation/presentation/providers/conversation_provider.dart';
+import 'package:signmind/features/learn/presentation/widgets/sign_avatar.dart';
 
 class ConversationScreen extends ConsumerStatefulWidget {
   const ConversationScreen({super.key});
@@ -225,39 +226,33 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   }
 
   Widget _buildMessageBubble(ConversationMessage message, TtsService tts) {
-    final isUser = message.sender == MessageSender.user;
+    if (message.sender == MessageSender.ai) {
+      return _AiMessageBubble(message: message, tts: tts);
+    }
+    // User message: text only, right-aligned.
     return Align(
-      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+      alignment: Alignment.centerRight,
       child: Container(
-        margin: EdgeInsets.only(
-          bottom: 12,
-          left: isUser ? 48 : 0,
-          right: isUser ? 0 : 48,
-        ),
+        margin: const EdgeInsets.only(bottom: 12, left: 48),
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: isUser ? AppTheme.primaryAccent : AppTheme.cardDark,
+          color: AppTheme.primaryAccent,
           borderRadius: BorderRadius.circular(18),
-          border: isUser ? null : Border.all(color: AppTheme.borderDark),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
+            const Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
-                  isUser ? Icons.person : Icons.smart_toy,
-                  size: 16,
-                  color: isUser ? AppTheme.textLight : AppTheme.successGreen,
-                ),
-                const SizedBox(width: 6),
+                Icon(Icons.person, size: 16, color: AppTheme.textLight),
+                SizedBox(width: 6),
                 Text(
-                  isUser ? 'คุณ' : 'SignMind AI',
+                  'คุณ',
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color: isUser ? AppTheme.textLight : AppTheme.successGreen,
+                    color: AppTheme.textLight,
                   ),
                 ),
               ],
@@ -265,58 +260,12 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
             const SizedBox(height: 6),
             Text(
               message.text,
-              style: const TextStyle(fontSize: 15, color: AppTheme.textLight, height: 1.3),
+              style: const TextStyle(
+                fontSize: 15,
+                color: AppTheme.textLight,
+                height: 1.3,
+              ),
             ),
-            if (message.signGloss != null && message.signGloss!.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: AppTheme.darkNavy.withAlpha(160),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.sign_language, size: 14, color: AppTheme.liveDotGreen),
-                    const SizedBox(width: 6),
-                    Text(
-                      'คำศัพท์ภาษามือ: ${message.signGloss}',
-                      style: const TextStyle(fontSize: 12, color: AppTheme.liveDotGreen),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-            if (!isUser) ...[
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  InkWell(
-                    onTap: () => tts.speak(message.text),
-                    child: Padding(
-                      padding: const EdgeInsets.all(4.0),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            tts.isSpeaking ? Icons.volume_up : Icons.volume_up_outlined,
-                            size: 16,
-                            color: AppTheme.textMutedDark,
-                          ),
-                          const SizedBox(width: 4),
-                          const Text(
-                            'ฟังเสียง',
-                            style: TextStyle(fontSize: 11, color: AppTheme.textMutedDark),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
           ],
         ),
       ),
@@ -398,6 +347,162 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
             icon: const Icon(Icons.send_rounded, color: AppTheme.liveDotGreen),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// AI reply bubble. The avatar signing the reply is the focus; the text
+/// transcript and gloss stay hidden until the user taps "แสดงข้อความ", so
+/// they practise reading the sign first. TTS stays available regardless.
+class _AiMessageBubble extends StatefulWidget {
+  const _AiMessageBubble({required this.message, required this.tts});
+
+  final ConversationMessage message;
+  final TtsService tts;
+
+  @override
+  State<_AiMessageBubble> createState() => _AiMessageBubbleState();
+}
+
+class _AiMessageBubbleState extends State<_AiMessageBubble> {
+  bool _revealed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final message = widget.message;
+    final tts = widget.tts;
+    final gloss = message.signGloss;
+    final signWord = (gloss != null && gloss.isNotEmpty) ? gloss : message.text;
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12, right: 48),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppTheme.cardDark,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: AppTheme.borderDark),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.smart_toy, size: 16, color: AppTheme.successGreen),
+                SizedBox(width: 6),
+                Text(
+                  'SignMind AI',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.successGreen,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            // The avatar signing the reply is the focus of the conversation.
+            Center(
+              child: SignAvatar(
+                word: signWord,
+                frames: message.keypointTransitions,
+                size: 180,
+              ),
+            ),
+            if (_revealed) ...[
+              const SizedBox(height: 12),
+              Text(
+                message.text,
+                style: const TextStyle(
+                  fontSize: 15,
+                  color: AppTheme.textLight,
+                  height: 1.3,
+                ),
+              ),
+              if (gloss != null && gloss.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: AppTheme.darkNavy.withAlpha(160),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.sign_language,
+                          size: 14, color: AppTheme.liveDotGreen),
+                      const SizedBox(width: 6),
+                      Text(
+                        'คำศัพท์ภาษามือ: $gloss',
+                        style: const TextStyle(
+                            fontSize: 12, color: AppTheme.liveDotGreen),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                InkWell(
+                  onTap: () => setState(() => _revealed = !_revealed),
+                  child: Padding(
+                    padding: const EdgeInsets.all(4.0),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _revealed
+                              ? Icons.visibility_off_outlined
+                              : Icons.visibility_outlined,
+                          size: 16,
+                          color: AppTheme.textMutedDark,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          _revealed ? 'ซ่อนข้อความ' : 'แสดงข้อความ',
+                          style: const TextStyle(
+                              fontSize: 11, color: AppTheme.textMutedDark),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                InkWell(
+                  onTap: () => tts.speak(message.text),
+                  child: Padding(
+                    padding: const EdgeInsets.all(4.0),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          tts.isSpeaking
+                              ? Icons.volume_up
+                              : Icons.volume_up_outlined,
+                          size: 16,
+                          color: AppTheme.textMutedDark,
+                        ),
+                        const SizedBox(width: 4),
+                        const Text(
+                          'ฟังเสียง',
+                          style: TextStyle(
+                              fontSize: 11, color: AppTheme.textMutedDark),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
