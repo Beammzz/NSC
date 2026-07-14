@@ -33,6 +33,8 @@ class SimulatedLearnRepository implements LearnRepository {
         LearnExercise(id: 1, topicId: 1, word: 'ขอโทษ', sortOrder: 0, passConfidence: 0.8),
         LearnExercise(id: 2, topicId: 1, word: 'บ๊ายบาย', sortOrder: 1, passConfidence: 0.8),
         LearnExercise(id: 3, topicId: 1, word: 'ดี', sortOrder: 2, passConfidence: 0.8),
+        LearnExercise(id: 4, topicId: 1, word: 'แย่', sortOrder: 3, passConfidence: 0.8),
+        LearnExercise(id: 5, topicId: 1, word: 'เร็ว', sortOrder: 4, passConfidence: 0.8),
       ],
     ),
     LearnTopic(
@@ -42,9 +44,11 @@ class SimulatedLearnRepository implements LearnRepository {
       icon: '👪',
       sortOrder: 1,
       exercises: [
-        LearnExercise(id: 4, topicId: 2, word: 'ฉัน', sortOrder: 0, passConfidence: 0.8),
-        LearnExercise(id: 5, topicId: 2, word: 'พ่อ', sortOrder: 1, passConfidence: 0.8),
-        LearnExercise(id: 6, topicId: 2, word: 'แม่', sortOrder: 2, passConfidence: 0.8),
+        LearnExercise(id: 6, topicId: 2, word: 'ฉัน', sortOrder: 0, passConfidence: 0.8),
+        LearnExercise(id: 7, topicId: 2, word: 'คุณ', sortOrder: 1, passConfidence: 0.8),
+        LearnExercise(id: 8, topicId: 2, word: 'พ่อ', sortOrder: 2, passConfidence: 0.8),
+        LearnExercise(id: 9, topicId: 2, word: 'แม่', sortOrder: 3, passConfidence: 0.8),
+        LearnExercise(id: 10, topicId: 2, word: 'พี่', sortOrder: 4, passConfidence: 0.8),
       ],
     ),
     LearnTopic(
@@ -54,27 +58,143 @@ class SimulatedLearnRepository implements LearnRepository {
       icon: '🍚',
       sortOrder: 2,
       exercises: [
-        LearnExercise(id: 7, topicId: 3, word: 'กิน', sortOrder: 0, passConfidence: 0.8),
-        LearnExercise(id: 8, topicId: 3, word: 'ข้าว', sortOrder: 1, passConfidence: 0.8),
-        LearnExercise(id: 9, topicId: 3, word: 'น้ำ', sortOrder: 2, passConfidence: 0.8),
+        LearnExercise(id: 11, topicId: 3, word: 'กิน', sortOrder: 0, passConfidence: 0.8),
+        LearnExercise(id: 12, topicId: 3, word: 'ดื่ม', sortOrder: 1, passConfidence: 0.8),
+        LearnExercise(id: 13, topicId: 3, word: 'ข้าว', sortOrder: 2, passConfidence: 0.8),
+        LearnExercise(id: 14, topicId: 3, word: 'น้ำ', sortOrder: 3, passConfidence: 0.8),
+        LearnExercise(id: 15, topicId: 3, word: 'ไข่', sortOrder: 4, passConfidence: 0.8),
+      ],
+    ),
+    LearnTopic(
+      id: 4,
+      slug: 'numbers',
+      title: 'ตัวเลข',
+      icon: '🔢',
+      sortOrder: 3,
+      exercises: [
+        LearnExercise(id: 16, topicId: 4, word: '1', sortOrder: 0, passConfidence: 0.8),
+        LearnExercise(id: 17, topicId: 4, word: '2', sortOrder: 1, passConfidence: 0.8),
+        LearnExercise(id: 18, topicId: 4, word: '3', sortOrder: 2, passConfidence: 0.8),
+        LearnExercise(id: 19, topicId: 4, word: '4', sortOrder: 3, passConfidence: 0.8),
+        LearnExercise(id: 20, topicId: 4, word: '5', sortOrder: 4, passConfidence: 0.8),
+      ],
+    ),
+    LearnTopic(
+      id: 5,
+      slug: 'colors',
+      title: 'สีสัน',
+      icon: '🎨',
+      sortOrder: 4,
+      exercises: [
+        LearnExercise(id: 21, topicId: 5, word: 'สีแดง', sortOrder: 0, passConfidence: 0.8),
+        LearnExercise(id: 22, topicId: 5, word: 'สีเขียว', sortOrder: 1, passConfidence: 0.8),
+        LearnExercise(id: 23, topicId: 5, word: 'สีฟ้า', sortOrder: 2, passConfidence: 0.8),
+        LearnExercise(id: 24, topicId: 5, word: 'สีดำ', sortOrder: 3, passConfidence: 0.8),
+        LearnExercise(id: 25, topicId: 5, word: 'สีชมพู', sortOrder: 4, passConfidence: 0.8),
+      ],
+    ),
+    LearnTopic(
+      id: 6,
+      slug: 'feelings',
+      title: 'อารมณ์ความรู้สึก',
+      icon: '😊',
+      sortOrder: 5,
+      exercises: [
+        LearnExercise(id: 26, topicId: 6, word: 'ดีใจ', sortOrder: 0, passConfidence: 0.8),
+        LearnExercise(id: 27, topicId: 6, word: 'หิว', sortOrder: 1, passConfidence: 0.8),
+        LearnExercise(id: 28, topicId: 6, word: 'ง่วง', sortOrder: 2, passConfidence: 0.8),
+        LearnExercise(id: 29, topicId: 6, word: 'เครียด', sortOrder: 3, passConfidence: 0.8),
+        LearnExercise(id: 30, topicId: 6, word: 'รัก', sortOrder: 4, passConfidence: 0.8),
+      ],
+    ),
+    LearnTopic(
+      id: 7,
+      slug: 'daily',
+      title: 'กิจวัตรประจำวัน',
+      icon: '🏃',
+      sortOrder: 6,
+      exercises: [
+        LearnExercise(id: 31, topicId: 7, word: 'นอน', sortOrder: 0, passConfidence: 0.8),
+        LearnExercise(id: 32, topicId: 7, word: 'ทำงาน', sortOrder: 1, passConfidence: 0.8),
+        LearnExercise(id: 33, topicId: 7, word: 'เรียน', sortOrder: 2, passConfidence: 0.8),
+        LearnExercise(id: 34, topicId: 7, word: 'อ่าน', sortOrder: 3, passConfidence: 0.8),
+        LearnExercise(id: 35, topicId: 7, word: 'เขียน', sortOrder: 4, passConfidence: 0.8),
+      ],
+    ),
+    LearnTopic(
+      id: 8,
+      slug: 'time',
+      title: 'วันและเวลา',
+      icon: '📅',
+      sortOrder: 7,
+      exercises: [
+        LearnExercise(id: 36, topicId: 8, word: 'วันนี้', sortOrder: 0, passConfidence: 0.8),
+        LearnExercise(id: 37, topicId: 8, word: 'พรุ่งนี้', sortOrder: 1, passConfidence: 0.8),
+        LearnExercise(id: 38, topicId: 8, word: 'เมื่อวาน', sortOrder: 2, passConfidence: 0.8),
+        LearnExercise(id: 39, topicId: 8, word: 'เช้า', sortOrder: 3, passConfidence: 0.8),
+        LearnExercise(id: 40, topicId: 8, word: 'เวลา', sortOrder: 4, passConfidence: 0.8),
       ],
     ),
   ];
 
-  static const _signs = [
-    DictionarySign(word: 'ขอโทษ', category: 'คำพื้นฐาน', hasAnimation: false),
-    DictionarySign(word: 'บ๊ายบาย', category: 'คำพื้นฐาน', hasAnimation: false),
-    DictionarySign(word: 'ดี', category: 'คำพื้นฐาน', hasAnimation: false),
-    DictionarySign(word: 'ฉัน', category: 'ผู้คนและครอบครัว', hasAnimation: false),
-    DictionarySign(word: 'พ่อ', category: 'ผู้คนและครอบครัว', hasAnimation: false),
-    DictionarySign(word: 'แม่', category: 'ผู้คนและครอบครัว', hasAnimation: false),
-    DictionarySign(word: 'กิน', category: 'อาหารและเครื่องดื่ม', hasAnimation: false),
-    DictionarySign(word: 'ข้าว', category: 'อาหารและเครื่องดื่ม', hasAnimation: false),
-    DictionarySign(word: 'น้ำ', category: 'อาหารและเครื่องดื่ม', hasAnimation: false),
-    DictionarySign(word: 'กาแฟ', category: 'อาหารและเครื่องดื่ม', hasAnimation: false),
-    DictionarySign(word: 'สีแดง', category: 'สี', hasAnimation: false),
-    DictionarySign(word: 'สีเขียว', category: 'สี', hasAnimation: false),
-  ];
+  static final List<DictionarySign> _signs = _dictionaryCategories.entries
+      .expand((entry) => entry.value.map(
+            (word) => DictionarySign(
+              word: word,
+              category: entry.key,
+              hasAnimation: false,
+            ),
+          ))
+      .toList();
+
+  static const _dictionaryCategories = <String, List<String>>{
+    'ตัวเลข': [
+      '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '20', '30', '100',
+    ],
+    'คำพื้นฐาน': [
+      'ขอโทษ', 'บ๊ายบาย', 'ดี', 'แย่', 'เร็ว', 'เอา',
+    ],
+    'ผู้คนและครอบครัว': [
+      'คุณ', 'ฉัน', 'ผม', 'เรา', 'พี่', 'พ่อ', 'แม่', 'พ่อค้า',
+    ],
+    'ร่างกาย': [
+      'คิ้ว', 'จมูก', 'ตา', 'นิ้ว', 'ปาก', 'มือ', 'หู', 'แก้ม',
+    ],
+    'อาหารและเครื่องดื่ม': [
+      'กล้วย', 'กาแฟ', 'กุ้ง', 'ข้าว', 'ชา', 'นม', 'น้ำ', 'ปลา',
+      'มะม่วง', 'ส้ม', 'เค้ก', 'แตงโม', 'แอปเปิ้ล', 'ไก่ทอด', 'ไข่',
+    ],
+    'สัตว์และธรรมชาติ': [
+      'กบ', 'นก', 'ปู', 'ไก่', 'ทราย', 'ทะเล', 'หิน', 'ลม', 'ฝนตก',
+    ],
+    'สี': [
+      'สี', 'สีชมพู', 'สีดำ', 'สีฟ้า', 'สีม่วง', 'สีเขียว', 'สีแดง',
+    ],
+    'วันและเดือน': [
+      'วันจันทร์', 'วันอังคาร', 'วันพุธ', 'วันพฤหัสบดี', 'วันศุกร์',
+      'วันเสาร์', 'วันอาทิตย์',
+      'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+      'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม',
+    ],
+    'เวลา': [
+      'วันนี้', 'พรุ่งนี้', 'เมื่อวาน', 'เมื่อวานซืน', 'เช้า', 'ปี', 'เดือน', 'เวลา',
+    ],
+    'อารมณ์ความรู้สึก': [
+      'กังวล', 'ง่วง', 'ดีใจ', 'หิว', 'เกลียด', 'เครียด', 'เบื่อ',
+      'ทะเลาะ', 'คิด', 'รัก',
+    ],
+    'กิจวัตรและการกระทำ': [
+      'กด', 'กระโดด', 'กิน', 'ขับรถ', 'ขาย', "ซื้อ", 'ดื่ม', 'ดู',
+      'ทำงาน', 'นอน', 'นั่ง', 'พูด', 'ฟัง', 'ยืน', 'วิ่ง', 'สอน',
+      'อาบน้ำ', 'อ่าน', 'เขียน', 'เดิน', 'เปิด', 'ปิด', 'เรียน', 'เล่น',
+      'โทร', 'ถ่ายรูป', 'ล้าง', 'แปรงฟัน', 'ไป',
+    ],
+    'สิ่งของและสถานที่': [
+      'กระจก', 'กระดาษ', 'กุญแจ', 'ตลาด', 'ตู้เสื้อผ้า', 'ถนน', 'ถุงเท้า',
+      'บ้าน', 'ปากกา', 'รองเท้า', 'หนังสือ', 'หมวก', 'ห้องครัว', 'เสื้อ',
+      'แว่น', 'โต๊ะ', 'โรงเรียน', 'สะพาน',
+    ],
+  };
 
   @override
   Future<List<LearnTopic>> fetchTopics() async {
@@ -135,7 +255,7 @@ class HttpLearnRepository implements LearnRepository {
       final uri = Uri.parse('$baseUrl$path');
       final request = await client.openUrl(method, uri);
       request.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
-      if (accessToken != null) {
+      if (accessToken != null && accessToken!.isNotEmpty) {
         request.headers
             .set(HttpHeaders.authorizationHeader, 'Bearer $accessToken');
       }

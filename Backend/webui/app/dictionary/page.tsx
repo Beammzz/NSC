@@ -22,8 +22,10 @@ export default function DictionaryPage() {
   const [newCategory, setNewCategory] = useState('');
   const [savingSign, setSavingSign] = useState(false);
 
-  // The word currently being recorded for (null = recorder closed).
-  const [recordingWord, setRecordingWord] = useState<string | null>(null);
+  // The word currently being recorded/uploaded for (null = recorder closed).
+  const [recorderModal, setRecorderModal] = useState<{ word: string; initialFile?: File } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadTargetWord, setUploadTargetWord] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   // Avatar animation preview (null = closed). Frames are fetched on demand.
@@ -74,7 +76,7 @@ export default function DictionaryPage() {
     try {
       await deleteSign(word);
       setNotice({ type: 'success', text: `Sign "${word}" deleted.` });
-      if (recordingWord === word) setRecordingWord(null);
+      if (recorderModal?.word === word) setRecorderModal(null);
       if (previewWord === word) closePreview();
       await load();
     } catch (err) {
@@ -147,49 +149,9 @@ export default function DictionaryPage() {
         </form>
       </div>
 
-      {recordingWord && (
-        <div className="card" style={{ marginBottom: 20, maxWidth: 620 }}>
-          <SignRecorder
-            word={recordingWord}
-            onUploaded={() => {
-              setNotice({ type: 'success', text: `Animation saved for "${recordingWord}".` });
-              setRecordingWord(null);
-              load();
-            }}
-            onCancel={() => setRecordingWord(null)}
-            onError={(text) => setNotice({ type: 'error', text })}
-          />
-        </div>
-      )}
 
-      {previewWord && (
-        <div className="card" style={{ marginBottom: 20, maxWidth: 620 }}>
-          <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
-            <h2 style={{ margin: 0 }}>Animation: {previewWord}</h2>
-            <button
-              className="secondary"
-              style={{ fontSize: 12, padding: '4px 10px' }}
-              onClick={closePreview}
-            >
-              Close
-            </button>
-          </div>
-          {previewLoading ? (
-            <div className="empty">Loading animation…</div>
-          ) : previewFrames && previewFrames.length > 0 ? (
-            <div className="row" style={{ gap: 16, alignItems: 'center' }}>
-              <AvatarPreview frames={previewFrames} />
-              <p className="subtitle" style={{ margin: 0 }}>
-                {previewFrames.length} frames · {previewFrames[0]?.length ?? 0} points/frame
-                <br />
-                Loops the recorded keypoints — the same animation the app avatar plays.
-              </p>
-            </div>
-          ) : (
-            <div className="empty">No animation data for this sign.</div>
-          )}
-        </div>
-      )}
+
+
 
       <div className="row" style={{ marginBottom: 12 }}>
         <span className="chip info">
@@ -238,9 +200,19 @@ export default function DictionaryPage() {
                       <button
                         className="secondary"
                         style={{ fontSize: 12, padding: '4px 10px' }}
-                        onClick={() => setRecordingWord(s.word)}
+                        onClick={() => setRecorderModal({ word: s.word })}
                       >
                         {s.has_animation ? 'Re-record' : 'Record'}
+                      </button>
+                      <button
+                        className="secondary"
+                        style={{ fontSize: 12, padding: '4px 10px' }}
+                        onClick={() => {
+                          setUploadTargetWord(s.word);
+                          fileInputRef.current?.click();
+                        }}
+                      >
+                        Upload video
                       </button>
                       {confirmDelete === s.word ? (
                         <>
@@ -276,6 +248,117 @@ export default function DictionaryPage() {
           </table>
         </div>
       )}
+
+      <input
+        type="file"
+        ref={fileInputRef}
+        accept="video/*,video/webm,video/mp4"
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file && uploadTargetWord) {
+            setRecorderModal({ word: uploadTargetWord, initialFile: file });
+          }
+          if (fileInputRef.current) fileInputRef.current.value = '';
+        }}
+      />
+
+      {recorderModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: 20,
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setRecorderModal(null);
+          }}
+        >
+          <div
+            className="card"
+            style={{
+              maxWidth: 620,
+              width: '100%',
+              maxHeight: '90vh',
+              overflow: 'auto',
+              margin: 0,
+              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
+            }}
+          >
+            <SignRecorder
+              word={recorderModal.word}
+              initialFile={recorderModal.initialFile}
+              onUploaded={() => {
+                setNotice({ type: 'success', text: `Animation saved for "${recorderModal.word}".` });
+                setRecorderModal(null);
+                load();
+              }}
+              onCancel={() => setRecorderModal(null)}
+              onError={(text) => setNotice({ type: 'error', text })}
+            />
+          </div>
+        </div>
+      )}
+
+      {previewWord && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: 20,
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closePreview();
+          }}
+        >
+          <div
+            className="card"
+            style={{
+              maxWidth: 620,
+              width: '100%',
+              maxHeight: '90vh',
+              overflow: 'auto',
+              margin: 0,
+              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
+            }}
+          >
+            <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
+              <h2 style={{ margin: 0 }}>Animation: {previewWord}</h2>
+              <button
+                className="secondary"
+                style={{ fontSize: 12, padding: '4px 10px' }}
+                onClick={closePreview}
+              >
+                Close
+              </button>
+            </div>
+            {previewLoading ? (
+              <div className="empty">Loading animation…</div>
+            ) : previewFrames && previewFrames.length > 0 ? (
+              <div className="row" style={{ gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+                <AvatarPreview frames={previewFrames} />
+                <p className="subtitle" style={{ margin: 0 }}>
+                  {previewFrames.length} frames · {previewFrames[0]?.length ?? 0} points/frame
+                  <br />
+                  Loops the recorded keypoints — the same animation the app avatar plays.
+                </p>
+              </div>
+            ) : (
+              <div className="empty">No animation data for this sign.</div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -287,11 +370,13 @@ type RecorderPhase = 'idle' | 'live' | 'recording' | 'recorded';
 // unmount, so closing the panel (parent clears recordingWord) always releases it.
 function SignRecorder({
   word,
+  initialFile,
   onUploaded,
   onCancel,
   onError,
 }: {
   word: string;
+  initialFile?: File;
   onUploaded: () => void;
   onCancel: () => void;
   onError: (msg: string) => void;
@@ -303,8 +388,9 @@ function SignRecorder({
   const blobRef = useRef<Blob | null>(null);
   const extRef = useRef<string>('webm');
   const urlRef = useRef<string | null>(null);
+  const localFileInputRef = useRef<HTMLInputElement>(null);
 
-  const [phase, setPhase] = useState<RecorderPhase>('idle');
+  const [phase, setPhase] = useState<RecorderPhase>(initialFile ? 'recorded' : 'idle');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
 
@@ -327,6 +413,36 @@ function SignRecorder({
       clearUrl();
     };
   }, []);
+
+  // If an initial file was passed (via Upload button), prepopulate blob and preview.
+  useEffect(() => {
+    if (initialFile) {
+      stopStream();
+      clearUrl();
+      blobRef.current = initialFile;
+      const ext = initialFile.name.split('.').pop()?.toLowerCase() || 'webm';
+      extRef.current = ext === 'mp4' ? 'mp4' : 'webm';
+      const url = URL.createObjectURL(initialFile);
+      urlRef.current = url;
+      setPreviewUrl(url);
+      setPhase('recorded');
+    }
+  }, [initialFile]);
+
+  function handleLocalFilePick(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    stopStream();
+    clearUrl();
+    blobRef.current = file;
+    const ext = file.name.split('.').pop()?.toLowerCase() || 'webm';
+    extRef.current = ext === 'mp4' ? 'mp4' : 'webm';
+    const url = URL.createObjectURL(file);
+    urlRef.current = url;
+    setPreviewUrl(url);
+    setPhase('recorded');
+    if (localFileInputRef.current) localFileInputRef.current.value = '';
+  }
 
   async function startCamera() {
     try {
@@ -459,8 +575,26 @@ function SignRecorder({
         </div>
       )}
 
-      <div className="row" style={{ gap: 8 }}>
-        {phase === 'idle' && <button onClick={startCamera}>Start camera</button>}
+      <input
+        type="file"
+        ref={localFileInputRef}
+        accept="video/*,video/webm,video/mp4"
+        style={{ display: 'none' }}
+        onChange={handleLocalFilePick}
+      />
+      <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+        {phase === 'idle' && (
+          <>
+            <button onClick={startCamera}>Start camera</button>
+            <button
+              className="secondary"
+              type="button"
+              onClick={() => localFileInputRef.current?.click()}
+            >
+              Upload video file
+            </button>
+          </>
+        )}
         {phase === 'live' && <button onClick={startRecording}>● Record</button>}
         {phase === 'recording' && (
           <button onClick={stopRecording}>■ Stop</button>
@@ -478,6 +612,14 @@ function SignRecorder({
             </button>
             <button className="secondary" onClick={reRecord} disabled={uploading}>
               Re-record
+            </button>
+            <button
+              className="secondary"
+              type="button"
+              onClick={() => localFileInputRef.current?.click()}
+              disabled={uploading}
+            >
+              Pick another file
             </button>
           </>
         )}

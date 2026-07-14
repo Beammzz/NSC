@@ -41,8 +41,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
 
     // Categories near the top of the list are built and visible.
-    expect(find.text('คำพื้นฐาน'), findsOneWidget);
-    expect(find.text('ขอโทษ'), findsOneWidget);
+    expect(find.text('ตัวเลข'), findsOneWidget);
+    expect(find.text('1'), findsOneWidget);
 
     // Filtering by category name surfaces its words and hides the rest.
     await tester.enterText(find.byType(TextField), 'สี');
@@ -50,6 +50,6 @@ void main() {
 
     expect(find.text('สีแดง'), findsOneWidget);
     expect(find.text('สีเขียว'), findsOneWidget);
-    expect(find.text('ขอโทษ'), findsNothing);
+    expect(find.text('1'), findsNothing);
   });
 }

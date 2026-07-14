@@ -165,9 +165,18 @@ class _RoadmapView extends ConsumerWidget {
             ),
           );
         }
-        return ListView(
-          padding: const EdgeInsets.only(bottom: 20),
-          children: nodes,
+        return RefreshIndicator(
+          color: AppTheme.primaryAccent,
+          backgroundColor: AppTheme.cardDark,
+          onRefresh: () async {
+            ref.invalidate(learnTopicsProvider);
+            ref.invalidate(learnProgressProvider);
+          },
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.only(bottom: 20),
+            children: nodes,
+          ),
         );
       },
     );
@@ -242,6 +251,7 @@ class _TopicNode extends ConsumerWidget {
           const SizedBox(width: 12),
           Expanded(
             child: Container(
+              width: double.infinity,
               margin: const EdgeInsets.only(bottom: 16),
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
@@ -439,23 +449,31 @@ class _DictionaryViewState extends ConsumerState<_DictionaryView> {
               for (final sign in filtered) {
                 grouped.putIfAbsent(sign.category, () => []).add(sign);
               }
-              return ListView(
-                padding: const EdgeInsets.only(bottom: 20),
-                children: [
-                  for (final entry in grouped.entries) ...[
-                    Padding(
-                      padding: const EdgeInsets.only(top: 12, bottom: 6),
-                      child: Text(
-                        entry.key.isEmpty ? 'อื่นๆ' : entry.key,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.textMutedDark,
+              return RefreshIndicator(
+                color: AppTheme.primaryAccent,
+                backgroundColor: AppTheme.cardDark,
+                onRefresh: () async {
+                  ref.invalidate(dictionaryProvider);
+                },
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.only(bottom: 20),
+                  children: [
+                    for (final entry in grouped.entries) ...[
+                      Padding(
+                        padding: const EdgeInsets.only(top: 12, bottom: 6),
+                        child: Text(
+                          entry.key.isEmpty ? 'อื่นๆ' : entry.key,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.textMutedDark,
+                          ),
                         ),
                       ),
-                    ),
-                    Container(
-                      decoration: BoxDecoration(
+                      Container(
+                        width: double.infinity,
+                        decoration: BoxDecoration(
                         color: AppTheme.cardDark,
                         borderRadius: BorderRadius.circular(14),
                         border: Border.all(
@@ -495,7 +513,8 @@ class _DictionaryViewState extends ConsumerState<_DictionaryView> {
                     ),
                   ],
                 ],
-              );
+              ),
+            );
             },
           ),
         ),
@@ -507,12 +526,15 @@ class _DictionaryViewState extends ConsumerState<_DictionaryView> {
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppTheme.cardDark,
+      isScrollControlled: true,
+      constraints: const BoxConstraints(maxWidth: double.infinity),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (sheetContext) {
-        return Padding(
-          padding: const EdgeInsets.all(24),
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [

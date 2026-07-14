@@ -25,7 +25,7 @@ Golang REST & WebSocket API server: gateway between the Flutter client and the P
 | `backend/internal/learn/` | Learning tab API: SQLite store + seed (topics/exercises/dictionary/progress), `/api/v1/learn/*` user routes and `/api/v1/admin/learn/*` CRUD routes |
 | `backend/internal/predlog/` | Pure-Go SQLite (`modernc.org/sqlite`) prediction history store supporting insertion, paginated query, count, and clearing |
 | `backend/internal/webui/` | Embeds and serves the compiled Next.js admin static export (`dist/`) at `/` |
-| `backend/webui/` | Next.js 15 + React 19 static admin web application source code (including AuthProvider, login page, and user management UI) |
+| `backend/webui/` | Next.js 15 + React 19 static admin web application source code (including AuthProvider, login page, dictionary recording and animation preview via modal pop-up, direct file upload, and user management UI) |
 
 ---
 
