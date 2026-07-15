@@ -159,7 +159,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'ระบบแปลภาษามือไทยเรียลไทม์และครูฝึก AI',
+                    'ระบบแปลภาษามือไทยเรียลไทม์',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 14,

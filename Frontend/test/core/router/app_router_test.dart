@@ -43,8 +43,6 @@ void main() {
     // Verify main app scaffold is displayed
     expect(find.byType(MainScaffold), findsOneWidget);
     expect(find.text('สแกน'), findsWidgets);
-    expect(find.text('ครูฝึก AI'), findsWidgets);
-    expect(find.text('สนทนา'), findsWidgets);
     expect(find.text('เรียนรู้'), findsWidgets);
     expect(find.text('ตั้งค่า'), findsWidgets);
   });

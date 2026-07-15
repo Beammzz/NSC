@@ -69,9 +69,8 @@ class LearnTopic {
 }
 
 /// One dictionary entry. [keypointFrames] (frames of avatar landmark
-/// points, same shape as the conversation endpoint's keypoint_transitions)
-/// is only populated by the detail fetch and may be null — the UI then
-/// renders a procedural placeholder animation.
+/// points) is only populated by the detail fetch and may be null — the UI
+/// then renders a procedural placeholder animation.
 class DictionarySign {
   final String word;
   final String category;

@@ -32,10 +32,8 @@ class MainScaffold extends ConsumerWidget {
 
     final tabs = [
       _TabItem(label: 'สแกน', glyph: '⌘', index: 0),
-      _TabItem(label: 'ครูฝึก AI', glyph: '✎', index: 1),
-      _TabItem(label: 'สนทนา', glyph: '💬', index: 2),
-      _TabItem(label: 'เรียนรู้', glyph: '📖', index: 3),
-      _TabItem(label: 'ตั้งค่า', glyph: '⚙', index: 4),
+      _TabItem(label: 'เรียนรู้', glyph: '📖', index: 1),
+      _TabItem(label: 'ตั้งค่า', glyph: '⚙', index: 2),
     ];
 
     return Scaffold(

@@ -2,10 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:signmind/core/widgets/main_scaffold.dart';
-import 'package:signmind/features/ai_tutor/presentation/screens/ai_tutor_screen.dart';
 import 'package:signmind/features/auth/presentation/providers/auth_provider.dart';
 import 'package:signmind/features/auth/presentation/screens/login_screen.dart';
-import 'package:signmind/features/conversation/presentation/screens/conversation_screen.dart';
 import 'package:signmind/features/landing/presentation/screens/landing_screen.dart';
 import 'package:signmind/features/learn/presentation/screens/exercise_practice_screen.dart';
 import 'package:signmind/features/learn/presentation/screens/learn_screen.dart';
@@ -63,26 +61,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 path: '/scanner',
                 pageBuilder: (context, state) => const NoTransitionPage(
                   child: ScannerScreen(),
-                ),
-              ),
-            ],
-          ),
-          StatefulShellBranch(
-            routes: [
-              GoRoute(
-                path: '/tutor',
-                pageBuilder: (context, state) => const NoTransitionPage(
-                  child: AiTutorScreen(),
-                ),
-              ),
-            ],
-          ),
-          StatefulShellBranch(
-            routes: [
-              GoRoute(
-                path: '/conversation',
-                pageBuilder: (context, state) => const NoTransitionPage(
-                  child: ConversationScreen(),
                 ),
               ),
             ],

@@ -8,13 +8,11 @@ class TranslationSheet extends StatelessWidget {
     required this.state,
     required this.onClearSentence,
     required this.onSpeak,
-    required this.onAiConversation,
   });
 
   final ScannerState state;
   final VoidCallback onClearSentence;
   final VoidCallback onSpeak;
-  final VoidCallback onAiConversation;
 
   @override
   Widget build(BuildContext context) {
@@ -150,60 +148,31 @@ class TranslationSheet extends StatelessWidget {
             const SizedBox(height: 14),
 
             // Action buttons
-            Row(
-              children: [
-                Expanded(
-                  flex: 14,
-                  child: ElevatedButton.icon(
-                    onPressed: onSpeak,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: state.isSpeaking
-                          ? AppTheme.primaryAccentHover
-                          : AppTheme.primaryAccent,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                    icon: Icon(
-                      state.isSpeaking ? Icons.circle : Icons.volume_up,
-                      size: 18,
-                    ),
-                    label: Text(
-                      state.isSpeaking ? 'กำลังพูด…' : 'อ่านออกเสียง',
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: onSpeak,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: state.isSpeaking
+                      ? AppTheme.primaryAccentHover
+                      : AppTheme.primaryAccent,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
                   ),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  flex: 10,
-                  child: OutlinedButton(
-                    onPressed: onAiConversation,
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppTheme.primaryAccent,
-                      side: const BorderSide(
-                        color: AppTheme.primaryAccent,
-                        width: 1.5,
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                    child: const Text(
-                      'โหมดสนทนา AI',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
+                icon: Icon(
+                  state.isSpeaking ? Icons.circle : Icons.volume_up,
+                  size: 18,
+                ),
+                label: Text(
+                  state.isSpeaking ? 'กำลังพูด…' : 'อ่านออกเสียง',
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
-              ],
+              ),
             ),
           ],
         ),

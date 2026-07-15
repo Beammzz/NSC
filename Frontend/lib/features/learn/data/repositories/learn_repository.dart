@@ -8,7 +8,7 @@ import 'package:signmind/features/settings/presentation/providers/settings_provi
 /// Data source for the Learn tab (topics, dictionary, progress). The real
 /// implementation talks to `/api/v1/learn/*`; the simulated one serves a
 /// local subset so demo mode works fully offline (matching the demo-mode
-/// contract of the stream and conversation features).
+/// contract of the stream feature).
 abstract class LearnRepository {
   Future<List<LearnTopic>> fetchTopics();
   Future<List<DictionarySign>> fetchDictionary();

@@ -68,8 +68,8 @@ type Exercise struct {
 }
 
 // Sign is one dictionary entry. KeypointFrames, when present, is the JSON
-// avatar animation ([][]{x,y,z} frames, same shape as the conversation
-// endpoint's keypoint_transitions); nil means the client renders a fallback.
+// avatar animation ([][]{x,y,z} frames); nil means the client renders a
+// fallback.
 type Sign struct {
 	Word           string          `json:"word"`
 	Category       string          `json:"category"`

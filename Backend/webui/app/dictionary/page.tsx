@@ -117,7 +117,7 @@ export default function DictionaryPage() {
       <h1>Dictionary</h1>
       <p className="subtitle">
         Build the recorded sign library: create a word, record it in-browser, and the backend extracts
-        the keypoint frames the avatar plays back in the dictionary and AI conversation
+        the keypoint frames the avatar plays back in the dictionary
       </p>
 
       {notice && <div className={`notice ${notice.type}`}>{notice.text}</div>}

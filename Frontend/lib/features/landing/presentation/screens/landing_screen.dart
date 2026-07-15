@@ -19,26 +19,6 @@ class LandingScreen extends StatelessWidget {
         route: '/scanner',
       ),
       _FeatureCardData(
-        title: 'ครูฝึก AI',
-        subtitle: 'AI Sign Language Tutor',
-        description:
-            'ฝึกฝนภาษามือกับระบบ AI อัจฉริยะ ตรวจสอบความถูกต้องของท่าทางแบบเรียลไทม์และให้คำแนะนำทันที',
-        badge: 'Interactive',
-        accentColor: AppTheme.primaryAccent,
-        icon: Icons.school_outlined,
-        route: '/tutor',
-      ),
-      _FeatureCardData(
-        title: 'สนทนาไร้รอยต่อ',
-        subtitle: 'Conversational AI Bridge',
-        description:
-            'สื่อสารสองทางระหว่างผู้ใช้ภาษามือและบุคคลทั่วไป แปลงเสียงพูดเป็นข้อความและข้อความเป็นภาษามือ',
-        badge: '2-Way Bridge',
-        accentColor: const Color(0xFF8B5CF6),
-        icon: Icons.chat_bubble_outline,
-        route: '/conversation',
-      ),
-      _FeatureCardData(
         title: 'เรียนรู้ภาษามือ',
         subtitle: 'Dictionary & Exercises',
         description:
@@ -205,7 +185,7 @@ class LandingScreen extends StatelessWidget {
                           ),
                           const SizedBox(height: 10),
                           const Text(
-                            'ระบบแปลภาษามือไทย (TSL) เป็นข้อความและเสียง พร้อมครูฝึก AI ส่วนตัว และระบบสะพานสื่อสารสองทาง เลือกฟีเจอร์ด้านล่างเพื่อเริ่มใช้งานทันที',
+                            'ระบบแปลภาษามือไทย (TSL) เป็นข้อความและเสียงแบบเรียลไทม์ เลือกฟีเจอร์ด้านล่างเพื่อเริ่มใช้งานทันที',
                             style: TextStyle(
                               fontSize: 13,
                               color: AppTheme.textMutedDark,

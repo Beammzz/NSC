@@ -188,7 +188,6 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
                 state: state,
                 onClearSentence: notifier.clearSentence,
                 onSpeak: notifier.speakSentence,
-                onAiConversation: () => context.go('/conversation'),
               ),
             ),
           ],

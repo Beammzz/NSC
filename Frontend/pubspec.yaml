@@ -38,7 +38,6 @@ dependencies:
   go_router: ^17.3.0
   google_fonts: ^8.1.0
   shared_preferences: ^2.5.5
-  speech_to_text: ^7.0.0
   web_socket_channel: ^3.0.3
 
 dev_dependencies:

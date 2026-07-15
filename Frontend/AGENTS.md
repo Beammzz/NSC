@@ -6,7 +6,7 @@ Child of root `AGENTS.md` (DOX). Root global contracts apply in full; this doc a
 
 ## Purpose
 
-Flutter mobile client (Android 9+ / iOS 13+): real-time TSL scanner, AI sign-language tutor, and conversational bridge UI. Extracts pose + hand landmarks on-device and streams feature vectors to the Golang backend.
+Flutter mobile client (Android 9+ / iOS 13+): real-time TSL scanner and dictionary/exercise learning UI. Extracts pose + hand landmarks on-device and streams feature vectors to the Golang backend.
 
 ---
 
@@ -15,7 +15,7 @@ Flutter mobile client (Android 9+ / iOS 13+): real-time TSL scanner, AI sign-lan
 | Path | Owns |
 |---|---|
 | `frontend/lib/core/` | Core theme (`app_theme.dart`), router (`app_router.dart`), and shared shell (`main_scaffold.dart`) |
-| `frontend/lib/features/<name>/` | One folder per feature (`auth`, `landing`, `scanner`, `settings`, `ai_tutor`, `conversation`, `learn`) with `presentation/`, `domain/`, `data/` layers |
+| `frontend/lib/features/<name>/` | One folder per feature (`auth`, `landing`, `scanner`, `settings`, `learn`) with `presentation/`, `domain/`, `data/` layers |
 | `frontend/lib/features/auth/` | Authentication feature (`authProvider`, `LoginScreen`) supporting live JWT login/signup or offline simulated demo mode. Contains embedded Server IP configuration card (`serverUrl`). |
 | `frontend/lib/features/scanner/data/services/tsl_stream_service.dart` | `TslStreamService` interface + `SimulatedTslStreamService` (demo loop) + `WebSocketTslStreamService` (real client for `<serverUrl>/api/v1/stream` per `docs/api/stream-schema.md`, sends `Authorization: Bearer` from `authProvider` on the WS handshake); provider picks one from the settings `useSimulatedStream` / `serverUrl` fields and the auth access token |
 | `frontend/lib/features/settings/` | App settings view displaying connected Server IP and demo-mode status; persisted via `shared_preferences` behind `sharedPreferencesProvider` (overridden in `main()` and in tests) |
@@ -32,7 +32,6 @@ Flutter mobile client (Android 9+ / iOS 13+): real-time TSL scanner, AI sign-lan
 - Entrypoint & Authentication Flow: The application initializes at `/login` (`LoginScreen`). `GoRouter.redirect` verifies `authProvider.isAuthenticated`; unauthenticated users or users who disconnect/logout are automatically returned to `/login`. `LoginScreen` includes a "Remember credentials" checkbox that saves and pre-populates email/password across sessions via `settingsProvider` and `SharedPreferences`.
 - Server IP Configuration: Configured directly on the Login Page (`LoginScreen`) before authenticating or entering demo mode. Settings Page displays the active server IP read-only with a shortcut back to `/login` to switch servers.
 - Real-time recognition streams feature vectors over WebSocket to `/api/v1/stream`; vector layout follows the root **Feature Vector Spec** — do not restate dimensions in frontend code comments, reference the spec.
-- Conversational AI and Speech Recognition use REST/WebSocket per root API rules.
 - Mobile Testing & Debugging: During testing or debugging, check `adb devices` for connected devices. If no device is connected, build an APK (`flutter build apk`) for the user to test instead.
 - Admin UI Access: Accessible via `http://127.0.0.1:8080` or `https://signmind.harumi.dev` (Agent credentials — email: `agent@example.com`, password: `Agent123`).
 - Every new feature ships with a corresponding test file (root Test Creation Mandate).

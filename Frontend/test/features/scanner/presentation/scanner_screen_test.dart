@@ -29,6 +29,5 @@ void main() {
     expect(find.text('ผลการแปล'), findsOneWidget);
     expect(find.text('ล้างข้อความ'), findsOneWidget);
     expect(find.text('อ่านออกเสียง'), findsOneWidget);
-    expect(find.text('โหมดสนทนา AI'), findsOneWidget);
   });
 }
