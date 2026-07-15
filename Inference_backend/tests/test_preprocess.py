@@ -119,3 +119,67 @@ class TestPreprocessSequence:
         seq[:, tp.RIGHT_HAND_SLICE] = 0.0
         out = tp.preprocess_sequence(seq, tp.DEFAULT_PREPROCESS_CONFIG)
         np.testing.assert_array_equal(out[:, tp.RIGHT_HAND_SLICE], 0.0)
+
+
+class TestResampleWindow:
+    def test_resample_window_units(self):
+        t_raw = np.array(
+            [0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 2000, 3000],
+            dtype=np.float64,
+        )
+        frames = np.zeros((len(t_raw), tp.POSITION_DIMS), dtype=np.float32)
+        frames[:, 0] = t_raw / 1000.0
+
+        target_len = 30
+        target_interval_ms = 100.0
+        out = tp.resample_window(frames, t_raw, target_len, target_interval_ms)
+        assert out is not None
+        assert out.shape == (30, tp.POSITION_DIMS)
+        assert out.dtype == np.float32
+        expected_t = 3000.0 - (29 - np.arange(30)) * 100.0
+        np.testing.assert_allclose(out[:, 0], expected_t / 1000.0, atol=1e-6)
+
+    def test_insufficient_span_returns_none(self):
+        t_raw = np.array([0, 100, 200], dtype=np.float64)
+        frames = np.zeros((3, tp.POSITION_DIMS), dtype=np.float32)
+        assert tp.resample_window(frames, t_raw, 30, 83.333) is None
+        assert tp.resample_window(frames[:1], t_raw[:1], 30, 83.333) is None
+
+    def test_presence_gating(self):
+        t_raw = np.array([0, 100, 200], dtype=np.float64)
+        frames = np.zeros((3, tp.POSITION_DIMS), dtype=np.float32)
+        frames[2, tp.RIGHT_HAND_SLICE] = 2.0
+
+        out = tp.resample_window(frames, t_raw, 3, 40.0)
+        assert out is not None
+        np.testing.assert_array_equal(out[0, tp.RIGHT_HAND_SLICE], 0.0)
+        np.testing.assert_array_equal(out[1, tp.RIGHT_HAND_SLICE], 2.0)
+        np.testing.assert_array_equal(out[2, tp.RIGHT_HAND_SLICE], 2.0)
+
+    def test_fps_invariance_property(self):
+        p_0 = np.linspace(0.1, 0.5, tp.POSITION_DIMS, dtype=np.float32)
+        v_vec = np.linspace(0.2, 0.8, tp.POSITION_DIMS, dtype=np.float32)
+
+        t_8fps = np.array([i * 125.0 for i in range(25)], dtype=np.float64)
+        f_8 = np.array([p_0 + v_vec * (t / 1000.0) for t in t_8fps], dtype=np.float32)
+
+        t_12fps = np.array([i * (1000.0 / 12.0) for i in range(37)], dtype=np.float64)
+        f_12 = np.array([p_0 + v_vec * (t / 1000.0) for t in t_12fps], dtype=np.float32)
+
+        target_len = 30
+        interval_ms = 1000.0 / 12.0
+
+        res_8 = tp.resample_window(f_8, t_8fps, target_len, interval_ms)
+        res_12 = tp.resample_window(f_12, t_12fps, target_len, interval_ms)
+        assert res_8 is not None and res_12 is not None
+
+        config = dict(tp.DEFAULT_PREPROCESS_CONFIG)
+        config["hand_local_norm"] = False
+        config["hand_scale_norm"] = False
+
+        out_8 = tp.preprocess_sequence(res_8, config)
+        out_12 = tp.preprocess_sequence(res_12, config)
+
+        v_8 = out_8[:, tp.POSITION_DIMS : 2 * tp.POSITION_DIMS]
+        v_12 = out_12[:, tp.POSITION_DIMS : 2 * tp.POSITION_DIMS]
+        np.testing.assert_allclose(v_8, v_12, atol=1e-5)

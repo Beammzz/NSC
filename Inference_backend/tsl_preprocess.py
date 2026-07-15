@@ -50,6 +50,7 @@ CONFIG_FILENAME = "preprocess_config.json"
 # runtime-tunable via the SetTuning RPC.
 DEFAULT_PREPROCESS_CONFIG = {
     "sequence_length": 30,
+    "target_fps": 12,
     "hand_local_norm": True,
     "hand_scale_norm": True,
     "use_velocity": True,
@@ -154,3 +155,83 @@ def preprocess_sequence(sequence: np.ndarray, config: dict) -> np.ndarray:
         if config["use_acceleration"]:
             blocks.append(np.diff(velocity, axis=0, prepend=velocity[:1]))
     return np.concatenate(blocks, axis=1).astype(np.float32)
+
+
+def resample_window(
+    frames: np.ndarray,
+    timestamps_ms: np.ndarray | list[int | float],
+    target_len: int,
+    target_interval_ms: float,
+) -> np.ndarray | None:
+    """Resample a sequence of timestamped position frames onto a uniform time grid.
+
+    Returns a (target_len, POSITION_DIMS) float32 array ending at the newest
+    timestamp, spaced by target_interval_ms, or None if the input history does
+    not cover the target duration (no extrapolation).
+    """
+    frames_arr = np.asarray(frames, dtype=np.float32)
+    t_raw = np.asarray(timestamps_ms, dtype=np.float64)
+    if frames_arr.ndim != 2 or frames_arr.shape[1] != POSITION_DIMS:
+        return None
+    if len(frames_arr) < 2 or len(t_raw) != len(frames_arr) or target_len < 1:
+        return None
+
+    # Guard non-monotonic / duplicate timestamps: keep strictly increasing sequence.
+    clean_t = [t_raw[0]]
+    clean_indices = [0]
+    for i in range(1, len(t_raw)):
+        if t_raw[i] > clean_t[-1]:
+            clean_t.append(t_raw[i])
+            clean_indices.append(i)
+    if len(clean_t) < 2:
+        return None
+
+    t_arr = np.array(clean_t, dtype=np.float64)
+    f_arr = frames_arr[clean_indices]
+
+    t_latest = t_arr[-1]
+    grid_t = t_latest - (
+        target_len - 1 - np.arange(target_len, dtype=np.float64)
+    ) * target_interval_ms
+    if t_arr[0] > grid_t[0]:
+        return None
+
+    out = np.zeros((target_len, POSITION_DIMS), dtype=np.float32)
+    for k in range(target_len):
+        t_k = grid_t[k]
+        right_idx = int(np.searchsorted(t_arr, t_k, side="left"))
+        if right_idx == 0:
+            idx_l, idx_r = 0, 0
+            alpha = 0.0
+        elif right_idx >= len(t_arr):
+            idx_l, idx_r = len(t_arr) - 1, len(t_arr) - 1
+            alpha = 0.0
+        else:
+            idx_l = right_idx - 1
+            idx_r = right_idx
+            dt = t_arr[idx_r] - t_arr[idx_l]
+            alpha = (t_k - t_arr[idx_l]) / dt if dt > 0 else 0.0
+
+        # Pose block: linear interpolation
+        out[k, :POSE_DIMS] = (
+            f_arr[idx_l, :POSE_DIMS]
+            + alpha * (f_arr[idx_r, :POSE_DIMS] - f_arr[idx_l, :POSE_DIMS])
+        )
+
+        # Presence-gated hand interpolation
+        if t_k - t_arr[idx_l] <= t_arr[idx_r] - t_k:
+            nearest_idx = idx_l
+        else:
+            nearest_idx = idx_r
+
+        for hand_slice in (LEFT_HAND_SLICE, RIGHT_HAND_SLICE):
+            hand_l = f_arr[idx_l, hand_slice]
+            hand_r = f_arr[idx_r, hand_slice]
+            present_l = np.any(hand_l != 0.0)
+            present_r = np.any(hand_r != 0.0)
+            if present_l and present_r:
+                out[k, hand_slice] = hand_l + alpha * (hand_r - hand_l)
+            else:
+                out[k, hand_slice] = f_arr[nearest_idx, hand_slice]
+
+    return out

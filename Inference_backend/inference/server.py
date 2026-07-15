@@ -84,7 +84,7 @@ class TslInferenceServicer(pb_grpc.TslInferenceServicer):
                 frame.features[: tsl_preprocess.POSITION_DIMS], dtype=np.float32
             )
             try:
-                result = session.add_frame(position)
+                result = session.add_frame(position, frame.timestamp_ms)
             except RuntimeError as exc:  # model hot-swapped mid-stream
                 context.abort(grpc.StatusCode.FAILED_PRECONDITION, str(exc))
             if result is None:

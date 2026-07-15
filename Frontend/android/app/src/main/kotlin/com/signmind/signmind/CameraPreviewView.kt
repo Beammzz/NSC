@@ -25,6 +25,7 @@ import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarkerResult
 import io.flutter.plugin.platform.PlatformView
+import java.util.ArrayDeque
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -56,6 +57,7 @@ class CameraPreviewView(
     // result. All three fields are touched only on the analysis thread.
     private var frameIndex = 0L
     private var lastPoseResult: PoseLandmarkerResult? = null
+    private val frameTimestamps = ArrayDeque<Long>()
 
     // Extraction is capped at TARGET_FPS to match the ~12fps the model was
     // trained on (the server windows 30 frames regardless of rate, so faster
@@ -167,7 +169,12 @@ class CameraPreviewView(
             frameIndex++
             val t3 = SystemClock.elapsedRealtime()
             LandmarkStreamHandler.emit(buildFrame(handResult, poseResult))
-            Log.d(TAG, "frame ms: bitmap=${t1 - t0} hand=${t2 - t1} pose=${t3 - t2} total=${t3 - t0}")
+            frameTimestamps.addLast(t3)
+            while (frameTimestamps.isNotEmpty() && t3 - frameTimestamps.first() > 1000L) {
+                frameTimestamps.removeFirst()
+            }
+            val fps = frameTimestamps.size
+            Log.d(TAG, "frame ms: bitmap=${t1 - t0} hand=${t2 - t1} pose=${t3 - t2} total=${t3 - t0} fps=$fps")
         } catch (e: Exception) {
             // A dropped/garbled frame just skips one overlay update, but never
             // silently: a per-frame throw here otherwise looks like a dead feed.
@@ -317,10 +324,10 @@ class CameraPreviewView(
         // normalization + overlay, and full cost 46-180ms/frame on the GPU of
         // a Redmi Note 12 5G vs ~15-40ms for lite.
         private const val POSE_MODEL = "pose_landmarker_lite.task"
-        // Stride 3 keeps pose+hand under the 83ms/frame budget of TARGET_FPS
-        // on the Redmi Note 12 5G class of GPU; pose refreshes ~4x/s, enough
+        // Stride 6 keeps pose+hand under the 83ms/frame budget of TARGET_FPS
+        // on the Redmi Note 12 5G class of GPU; pose refreshes ~2x/s, enough
         // for the slow-moving torso normalization it feeds.
-        private const val POSE_FRAME_STRIDE = 3
+        private const val POSE_FRAME_STRIDE = 6
         private const val TARGET_FPS = 12
         private const val FRAME_INTERVAL_MS = 1000L / TARGET_FPS
     }

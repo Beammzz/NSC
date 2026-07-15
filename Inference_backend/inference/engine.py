@@ -60,7 +60,7 @@ def default_interpreter_factory(model_path: str):
         import ai_edge_litert.interpreter as litert
     except ImportError:
         try:
-            import tensorflow.lite as litert
+            import tensorflow.lite as litert  # pyright: ignore[reportMissingImports]
         except ImportError as exc:
             raise ModelLoadError(
                 "No TFLite runtime: install 'ai-edge-litert' or 'tensorflow' "
@@ -437,26 +437,37 @@ class InferenceEngine:
 
 
 class InferenceSession:
-    """Per-stream sliding window over position frames."""
+    """Per-stream sliding window over timestamped position frames."""
 
     def __init__(self, engine: InferenceEngine):
         self._engine = engine
-        self._window: deque[np.ndarray] = deque(
-            maxlen=int(engine.config["sequence_length"])
+        target_len = int(engine.config.get("sequence_length", 30))
+        self._window: deque[tuple[float, np.ndarray]] = deque(
+            maxlen=max(120, target_len * 4)
         )
 
     def reset(self) -> None:
         self._window.clear()
 
-    def add_frame(self, position_features: np.ndarray) -> PredictionResult | None:
-        """Append one (147,) position frame; predict once the window is full."""
+    def add_frame(
+        self, position_features: np.ndarray, timestamp_ms: int | float
+    ) -> PredictionResult | None:
+        """Append position frame with timestamp; predict once duration covers window."""
         frame = np.asarray(position_features, dtype=np.float32)
         if frame.shape != (tsl_preprocess.POSITION_DIMS,):
             raise ValueError(
                 f"expected ({tsl_preprocess.POSITION_DIMS},) position frame, "
                 f"got {frame.shape}"
             )
-        self._window.append(frame)
-        if len(self._window) < self._window.maxlen:
+        self._window.append((float(timestamp_ms), frame))
+        target_len = int(self._engine.config.get("sequence_length", 30))
+        target_fps = float(self._engine.config.get("target_fps", 12))
+        target_interval_ms = 1000.0 / target_fps
+        timestamps = [t for t, _ in self._window]
+        frames = [f for _, f in self._window]
+        resampled = tsl_preprocess.resample_window(
+            frames, timestamps, target_len, target_interval_ms
+        )
+        if resampled is None:
             return None
-        return self._engine.predict_window(np.array(self._window))
+        return self._engine.predict_window(resampled)

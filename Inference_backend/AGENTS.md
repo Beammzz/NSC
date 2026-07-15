@@ -14,9 +14,9 @@ Python gRPC TSL inference service: receives landmark-frame streams from the Gola
 
 | Path | Owns |
 |---|---|
-| `tsl_preprocess.py` | Training-matching preprocessing: config load, hand normalization, delta features. ⚠️ RECONSTRUCTION — see Local Contracts |
+| `tsl_preprocess.py` | Training-matching preprocessing: config load, hand normalization, temporal resampling (`resample_window` / `target_fps: 12`), delta features. ⚠️ RECONSTRUCTION — see Local Contracts |
 | `tsl_live_inference.py` | Webcam demo (MediaPipe + TFLite); reference implementation the server mirrors |
-| `inference/engine.py` | Model lifecycle (load/validate/hot-swap), per-stream sliding-window sessions, idle bypass, uncertainty gate, runtime tuning |
+| `inference/engine.py` | Model lifecycle (load/validate/hot-swap), per-stream timestamped sliding-window sessions (`resample_window`), idle bypass, uncertainty gate, runtime tuning |
 | `inference/server.py` | `TslInference` gRPC servicer (`StreamInference`, `UploadModel`, `StreamLogs`, `GetTuning`/`SetTuning`) + entrypoint |
 | `inference/logstream.py` | Logging handler: ring buffer + live subscriber queues feeding `StreamLogs` |
 | `inference/pb/` | Generated stubs from `docs/api/tsl_inference.proto` — never edit by hand; regenerate (see Work Guidance) |
@@ -27,9 +27,10 @@ Python gRPC TSL inference service: receives landmark-frame streams from the Gola
 
 ## Local Contracts
 
-- Contract source of truth: `docs/api/tsl_inference.proto`. Wire frames carry exactly 441 floats (`docs/api/stream-schema.md`, schema_version 1); the service consumes only the position block (first 147) and recomputes hand normalization + velocity/acceleration itself.
+- Contract source of truth: `docs/api/tsl_inference.proto`. Wire frames carry exactly 441 floats (`docs/api/stream-schema.md`, schema_version 1); the service consumes only the position block (first 147) along with `timestamp_ms`, and recomputes temporal resampling, hand normalization, and velocity/acceleration itself.
 - Landmark path is gRPC bidirectional streaming only — no HTTP fallback (root DOX).
-- ⚠️ `tsl_preprocess.py` is a spec-based RECONSTRUCTION (the original was lost with `ai/`). Its config keys match the recovered training `preprocess_config.json` (`hand_local_norm`, `hand_scale_norm`, `use_velocity`, `use_acceleration`, `confidence_threshold` — restored 2026-07-11), but the hand-normalization FORMULAS are assumptions (wrist-recenter; scale by max landmark distance from wrist). Live signing accuracy is the acceptance test; if the original module turns up, it replaces the reconstruction.
+- ⚠️ `tsl_preprocess.py` is a spec-based RECONSTRUCTION (the original was lost with `ai/`). Its config keys match the recovered training `preprocess_config.json` (`hand_local_norm`, `hand_scale_norm`, `use_velocity`, `use_acceleration`, `confidence_threshold`, `target_fps: 12`). Temporal resampling (`resample_window`) uses presence-gated linear interpolation over the timestamped frame buffer to convert variable capture rates (8–30 fps) to the training grid (`12 fps`).
+- `InferenceSession` maintains a timestamped ring buffer of `(timestamp_ms, position_features)` sized by duration rather than fixed count. Predictions start only once accumulated frame history covers the target window duration (`(sequence_length - 1) * (1000 / target_fps)` ≈ `2.42 s` for 30 frames at 12 fps).
 - The label map may contain an idle class (`ไม่ทำอะไรเลย`); the engine detects it by matching `IDLE_LABEL_THAI`/`IDLE_LABEL_EN` substrings and sets `idle_idx`. When `idle_idx` exists: (1) the heuristic idle bypass synthesizes a 100% idle result, and (2) if the model's own top prediction is the idle class, `is_idle=true` is set on the inference result. When there is no idle class (`idle_idx is None`), the bypass returns an empty word with confidence 0. Clients must key off `is_idle`, never the word.
 - `UploadModel` never overwrites live artifact files (Windows refuses replacing a memory-mapped model): each upload lands in `TSL_Output/uploads/<utc-ts>/` and `TSL_Output/active_model.json` points at the active set. Legacy layout (files directly in `TSL_Output/`) is the fallback when no manifest exists.
 - Uploads are validated (interpreter loads, label map parses and matches class count, feature dim matches preprocess config) before the swap; on failure the previous model stays live.

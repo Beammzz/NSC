@@ -17,8 +17,10 @@ from inference.pb import tsl_inference_pb2_grpc as pb_grpc
 CONFIDENT = [0.05, 0.9, 0.04, 0.01]  # top-1 "ขอบคุณ"
 
 
-def frame(seq, features):
-    return pb.LandmarkFrame(seq=seq, timestamp_ms=seq * 33, features=features)
+def frame(seq, features, timestamp_ms=None):
+    if timestamp_ms is None:
+        timestamp_ms = int(round(seq * (1000.0 / 12.0)))
+    return pb.LandmarkFrame(seq=seq, timestamp_ms=timestamp_ms, features=features)
 
 
 def wire_frames(count, start_seq=0):
