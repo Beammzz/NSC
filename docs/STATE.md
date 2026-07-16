@@ -183,11 +183,12 @@ Fix the 4 high-priority findings from the JWT auth review of commit f06309e:
 4. Trust X-Forwarded-For only when SIGNMIND_TRUST_PROXY=true; bound RateLimiter memory.
 
 ## Now
-Completed app icon setup across both native mobile launcher (`icon app`) and Flutter UI screens (`inside the app`). Configured `pubspec.yaml` and generated native Android/iOS launcher icons via `flutter_launcher_icons` using `assets/icons/app_icon.png`. Replaced text badge placeholders (`'⌘'` and `'มือ'`) with `Image.asset('assets/icons/app_icon.png')` across `LoginScreen`, `LandingScreen`, `ScannerScreen`, and `SettingsScreen`.
+Completed app icon update and installation across both native mobile launcher and Flutter UI screens (`inside the app`). Copied the user-provided sign-language outline icon over `assets/icons/app_icon.png`, regenerated native Android/iOS launcher icons (`dart run flutter_launcher_icons`), built release APK (`flutter build apk`), and installed to connected phone via `adb install -r`.
 
 ## Next
 - [x] Step 1: Copy image to `assets/icons/app_icon.png`, configure `pubspec.yaml` and `flutter_launcher_icons`, and run generator.
 - [x] Step 2: Update `login_screen.dart`, `landing_screen.dart`, `scanner_screen.dart`, `settings_screen.dart` with `Image.asset('assets/icons/app_icon.png')` and verify via `flutter analyze && flutter test`.
+- [x] Step 3: Replace `app_icon.png` with provided sign-language outline icon, regenerate `flutter_launcher_icons`, rebuild release APK (`app-release.apk`), and install via `adb`.
 
 ## Constraints
 None stated yet.

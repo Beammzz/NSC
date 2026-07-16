@@ -345,3 +345,6 @@ groups_raw.npy
 *.sqlite
 *.sqlite3
 Backend/data/*.db*
+
+# Allow pubspec.lock
+!Frontend/pubspec.lock
