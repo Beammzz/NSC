@@ -40,13 +40,34 @@ void main() {
     expect(find.text('ACTIVE'), findsOneWidget);
 
     // Verify default state in Riverpod provider
-    expect(container.read(settingsProvider).isDarkMode, isTrue);
+    expect(container.read(settingsProvider).themeMode, ThemeMode.system);
     expect(container.read(settingsProvider).autoSpeak, isTrue);
-    expect(container.read(settingsProvider).serverUrl, 'https://signmind.harumi.dev');
+    expect(
+      container.read(settingsProvider).serverUrl,
+      'https://signmind.harumi.dev',
+    );
+
+    // Test selecting Dark Theme option
+    final darkOptionFinder = find.text('โหมดมืด');
+    expect(darkOptionFinder, findsOneWidget);
+    await tester.tap(darkOptionFinder);
+    await tester.pumpAndSettle();
+    expect(container.read(settingsProvider).themeMode, ThemeMode.dark);
+    expect(container.read(settingsProvider).isDarkMode, isTrue);
+
+    // Test selecting Light Theme option
+    final lightOptionFinder = find.text('โหมดสว่าง');
+    expect(lightOptionFinder, findsOneWidget);
+    await tester.ensureVisible(lightOptionFinder);
+    await tester.tap(lightOptionFinder);
+    await tester.pumpAndSettle();
+    expect(container.read(settingsProvider).themeMode, ThemeMode.light);
+    expect(container.read(settingsProvider).isDarkMode, isFalse);
 
     // Toggle Auto TTS switch
     final autoSpeakFinder = find.text('อ่านออกเสียงอัตโนมัติ (Auto TTS)');
     expect(autoSpeakFinder, findsOneWidget);
+    await tester.ensureVisible(autoSpeakFinder);
     await tester.tap(autoSpeakFinder);
     await tester.pumpAndSettle();
 

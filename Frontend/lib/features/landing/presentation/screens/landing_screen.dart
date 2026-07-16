@@ -41,7 +41,7 @@ class LandingScreen extends StatelessWidget {
     ];
 
     return Scaffold(
-      backgroundColor: AppTheme.darkNavy,
+      backgroundColor: context.scaffoldBackgroundColor,
       body: SafeArea(
         child: Column(
           children: [
@@ -64,17 +64,19 @@ class LandingScreen extends StatelessWidget {
                           ),
                         ),
                         alignment: Alignment.center,
-                        child: const Text(
-                          '⌘',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w800,
-                            color: AppTheme.textLight,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Padding(
+                            padding: const EdgeInsets.all(4),
+                            child: Image.asset(
+                              'assets/icons/app_icon.png',
+                              fit: BoxFit.contain,
+                            ),
                           ),
                         ),
                       ),
                       const SizedBox(width: 12),
-                      const Column(
+                      Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
@@ -82,7 +84,7 @@ class LandingScreen extends StatelessWidget {
                             style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.w700,
-                              color: AppTheme.textLight,
+                              color: context.textColor,
                               letterSpacing: 0.3,
                             ),
                           ),
@@ -90,7 +92,7 @@ class LandingScreen extends StatelessWidget {
                             'ศูนย์แนะนำฟีเจอร์ระบบ',
                             style: TextStyle(
                               fontSize: 12,
-                              color: AppTheme.textMutedDark,
+                              color: context.textMutedColor,
                             ),
                           ),
                         ],
@@ -139,7 +141,7 @@ class LandingScreen extends StatelessWidget {
                           end: Alignment.bottomRight,
                         ),
                         borderRadius: BorderRadius.circular(24),
-                        border: Border.all(color: AppTheme.borderDark),
+                        border: Border.all(color: context.borderColor),
                         boxShadow: [
                           BoxShadow(
                             color: Colors.black.withAlpha(60),
@@ -220,7 +222,7 @@ class LandingScreen extends StatelessWidget {
                     const SizedBox(height: 24),
 
                     // Section Title
-                    const Row(
+                    Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
@@ -228,7 +230,7 @@ class LandingScreen extends StatelessWidget {
                           style: TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w700,
-                            color: AppTheme.textLight,
+                            color: context.textColor,
                           ),
                         ),
                         Text(
@@ -236,7 +238,7 @@ class LandingScreen extends StatelessWidget {
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
-                            color: AppTheme.textMutedDark,
+                            color: context.textMutedColor,
                           ),
                         ),
                       ],
@@ -298,7 +300,7 @@ class _FeatureCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: AppTheme.cardDark,
+      color: context.cardColor,
       borderRadius: BorderRadius.circular(18),
       child: InkWell(
         key: Key('featureCard_${data.route}'),
@@ -308,7 +310,7 @@ class _FeatureCard extends StatelessWidget {
           padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: AppTheme.borderDark),
+            border: Border.all(color: context.borderColor),
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -335,10 +337,10 @@ class _FeatureCard extends StatelessWidget {
                         Expanded(
                           child: Text(
                             data.title,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w700,
-                              color: AppTheme.textLight,
+                              color: context.textColor,
                             ),
                           ),
                         ),
@@ -365,18 +367,18 @@ class _FeatureCard extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       data.subtitle,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w500,
-                        color: AppTheme.textMutedDark,
+                        color: context.textMutedColor,
                       ),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       data.description,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
-                        color: AppTheme.textLight,
+                        color: context.textColor,
                         height: 1.4,
                       ),
                     ),
@@ -384,9 +386,9 @@ class _FeatureCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              const Icon(
+              Icon(
                 Icons.chevron_right,
-                color: AppTheme.textMutedDark,
+                color: context.textMutedColor,
               ),
             ],
           ),

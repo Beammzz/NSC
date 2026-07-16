@@ -95,3 +95,18 @@ class AppTheme {
     );
   }
 }
+
+extension AppThemeContextExtension on BuildContext {
+  ThemeData get theme => Theme.of(this);
+  ColorScheme get colorScheme => Theme.of(this).colorScheme;
+  bool get isDarkMode => Theme.of(this).brightness == Brightness.dark;
+
+  Color get scaffoldBackgroundColor => Theme.of(this).scaffoldBackgroundColor;
+  Color get cardColor => Theme.of(this).colorScheme.surface;
+  Color get textColor => Theme.of(this).colorScheme.onSurface;
+  Color get textMutedColor =>
+      isDarkMode ? AppTheme.textMutedDark : AppTheme.textMutedLight;
+  Color get borderColor =>
+      isDarkMode ? AppTheme.borderDark : AppTheme.borderLight;
+}
+

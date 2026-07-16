@@ -39,10 +39,10 @@ class MainScaffold extends ConsumerWidget {
     return Scaffold(
       body: navigationShell,
       bottomNavigationBar: Container(
-        decoration: const BoxDecoration(
-          color: AppTheme.darkNavy,
+        decoration: BoxDecoration(
+          color: context.scaffoldBackgroundColor,
           border: Border(
-            top: BorderSide(color: AppTheme.borderDark, width: 1),
+            top: BorderSide(color: context.borderColor, width: 1),
           ),
         ),
         padding: const EdgeInsets.only(top: 8, bottom: 24, left: 8, right: 8),
@@ -52,9 +52,10 @@ class MainScaffold extends ConsumerWidget {
             final isSelected = currentIndex == tab.index;
             final iconBg = isSelected
                 ? AppTheme.primaryAccent
-                : AppTheme.borderDark.withAlpha(35);
-            final iconFg = isSelected ? Colors.white : AppTheme.textMutedDark;
-            final labelColor = isSelected ? AppTheme.textLight : AppTheme.textMutedDark;
+                : context.borderColor.withAlpha(35);
+            final iconFg = isSelected ? Colors.white : context.textMutedColor;
+            final labelColor =
+                isSelected ? context.textColor : context.textMutedColor;
 
             return GestureDetector(
               onTap: () => _onTap(context, tab.index),

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -26,20 +27,48 @@ class AuthNotifier extends Notifier<AuthState> {
     return trimmed;
   }
 
+  Future<({int statusCode, String body})> _postWithTimeout(
+    Uri url,
+    Map<String, dynamic> payload,
+  ) async {
+    final client = HttpClient();
+    client.connectionTimeout = const Duration(seconds: 3);
+    try {
+      return await _performPost(client, url, payload).timeout(
+        const Duration(seconds: 3),
+        onTimeout: () => throw TimeoutException('เซิร์ฟเวอร์ไม่ตอบสนองภายใน 3 วินาที'),
+      );
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  Future<({int statusCode, String body})> _performPost(
+    HttpClient client,
+    Uri url,
+    Map<String, dynamic> payload,
+  ) async {
+    final request = await client.postUrl(url);
+    request.headers.set('content-type', 'application/json');
+    request.write(jsonEncode(payload));
+    final resp = await request.close();
+    final body = await resp.transform(utf8.decoder).join();
+    return (statusCode: resp.statusCode, body: body);
+  }
+
   Future<bool> login(String email, String password, String serverUrl) async {
     state = state.copyWith(isLoading: true, clearError: true);
     try {
       final baseUrl = _toHttpUrl(serverUrl);
       final url = Uri.parse('$baseUrl/api/v1/auth/login');
-      final client = HttpClient();
-      client.connectionTimeout = const Duration(seconds: 6);
-      final request = await client.postUrl(url);
-      request.headers.set('content-type', 'application/json');
-      request.write(jsonEncode({'email': email.trim(), 'password': password}));
-      final resp = await request.close();
-      final body = await resp.transform(utf8.decoder).join();
+      final result = await _postWithTimeout(
+        url,
+        {'email': email.trim(), 'password': password},
+      );
+      final statusCode = result.statusCode;
+      final body = result.body;
 
-      if (resp.statusCode == 200) {
+      if (statusCode == 200) {
         final data = jsonDecode(body) as Map<String, dynamic>;
         final user = AuthUser.fromJson(data['user'] as Map<String, dynamic>);
         final token = data['access_token'] as String?;
@@ -57,7 +86,7 @@ class AuthNotifier extends Notifier<AuthState> {
         ref.read(tslStreamServiceProvider).start();
         return true;
       } else {
-        String msg = 'เข้าสู่ระบบไม่สำเร็จ (${resp.statusCode})';
+        String msg = 'เข้าสู่ระบบไม่สำเร็จ ($statusCode)';
         try {
           final problem = jsonDecode(body) as Map<String, dynamic>;
           if (problem['title'] != null) {
@@ -70,11 +99,25 @@ class AuthNotifier extends Notifier<AuthState> {
         state = state.copyWith(isLoading: false, error: msg);
         return false;
       }
-    } catch (e) {
+    } on TimeoutException {
       state = state.copyWith(
         isLoading: false,
-        error: 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบ Server IP ($e)',
+        error: 'เซิร์ฟเวอร์ไม่ตอบสนองภายใน 3 วินาที กรุณาตรวจสอบ Server IP',
       );
+      return false;
+    } catch (e) {
+      if (e is TimeoutException ||
+          (e is SocketException && e.toString().toLowerCase().contains('time'))) {
+        state = state.copyWith(
+          isLoading: false,
+          error: 'เซิร์ฟเวอร์ไม่ตอบสนองภายใน 3 วินาที กรุณาตรวจสอบ Server IP',
+        );
+      } else {
+        state = state.copyWith(
+          isLoading: false,
+          error: 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบ Server IP ($e)',
+        );
+      }
       return false;
     }
   }
@@ -84,15 +127,14 @@ class AuthNotifier extends Notifier<AuthState> {
     try {
       final baseUrl = _toHttpUrl(serverUrl);
       final url = Uri.parse('$baseUrl/api/v1/auth/signup');
-      final client = HttpClient();
-      client.connectionTimeout = const Duration(seconds: 6);
-      final request = await client.postUrl(url);
-      request.headers.set('content-type', 'application/json');
-      request.write(jsonEncode({'email': email.trim(), 'password': password}));
-      final resp = await request.close();
-      final body = await resp.transform(utf8.decoder).join();
+      final result = await _postWithTimeout(
+        url,
+        {'email': email.trim(), 'password': password},
+      );
+      final statusCode = result.statusCode;
+      final body = result.body;
 
-      if (resp.statusCode == 200 || resp.statusCode == 201) {
+      if (statusCode == 200 || statusCode == 201) {
         final data = jsonDecode(body) as Map<String, dynamic>;
         final user = AuthUser.fromJson(data['user'] as Map<String, dynamic>);
         final token = data['access_token'] as String?;
@@ -108,7 +150,7 @@ class AuthNotifier extends Notifier<AuthState> {
         ref.read(tslStreamServiceProvider).start();
         return true;
       } else {
-        String msg = 'สมัครสมาชิกไม่สำเร็จ (${resp.statusCode})';
+        String msg = 'สมัครสมาชิกไม่สำเร็จ ($statusCode)';
         try {
           final problem = jsonDecode(body) as Map<String, dynamic>;
           if (problem['title'] != null) {
@@ -121,11 +163,25 @@ class AuthNotifier extends Notifier<AuthState> {
         state = state.copyWith(isLoading: false, error: msg);
         return false;
       }
-    } catch (e) {
+    } on TimeoutException {
       state = state.copyWith(
         isLoading: false,
-        error: 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบ Server IP ($e)',
+        error: 'เซิร์ฟเวอร์ไม่ตอบสนองภายใน 3 วินาที กรุณาตรวจสอบ Server IP',
       );
+      return false;
+    } catch (e) {
+      if (e is TimeoutException ||
+          (e is SocketException && e.toString().toLowerCase().contains('time'))) {
+        state = state.copyWith(
+          isLoading: false,
+          error: 'เซิร์ฟเวอร์ไม่ตอบสนองภายใน 3 วินาที กรุณาตรวจสอบ Server IP',
+        );
+      } else {
+        state = state.copyWith(
+          isLoading: false,
+          error: 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบ Server IP ($e)',
+        );
+      }
       return false;
     }
   }

@@ -100,6 +100,12 @@ extract_keypoints run exit 0 (4 frames x 7 pts; models downloaded to Backend/, n
 dev.ps1, .gitignore. UNCOMMITTED. Old stack bw1d0ufh5 replaced by b03r3rw7q.
 
 ## Goal (current)
+Setup app icon both inside the app and for native launcher (2026-07-16): copy provided image to `Frontend/assets/icons/app_icon.png`, configure `pubspec.yaml` and `flutter_launcher_icons` to generate native Android/iOS launcher icons (`icon app`), and replace text badge placeholders (`'⌘'` / `'มือ'`) across `login_screen.dart`, `landing_screen.dart`, and `scanner_screen.dart` with `Image.asset('assets/icons/app_icon.png')` (`inside the app`).
+
+## Prior goal: theme fixes (done, uncommitted)
+Fix white/light theme across entire app UI (2026-07-16): replace hardcoded AppTheme static dark colors across all UI screens with dynamic Theme.of(context) properties and theme extensions (`AppThemeContextExtension`). All 48 tests pass cleanly.
+
+## Prior goal: learning tab (done, uncommitted)
 Learning tab (2026-07-13): dictionary + Duolingo-style exercise roadmap, full stack.
 User decisions: full stack now; dictionary shows avatar keypoint animation (procedural
 fallback — no real keypoint data exists yet, learn_signs.keypoint_frames column ready);
@@ -177,15 +183,11 @@ Fix the 4 high-priority findings from the JWT auth review of commit f06309e:
 4. Trust X-Forwarded-For only when SIGNMIND_TRUST_PROXY=true; bound RateLimiter memory.
 
 ## Now
-All 4 fixes done and verified (go vet/test, flutter analyze/test, live E2E probe on :8091:
-401 without token on /stream + /conversation, 200 with Bearer, no Secure attr on plain-HTTP
-login cookies). Uncommitted.
+Completed app icon setup across both native mobile launcher (`icon app`) and Flutter UI screens (`inside the app`). Configured `pubspec.yaml` and generated native Android/iOS launcher icons via `flutter_launcher_icons` using `assets/icons/app_icon.png`. Replaced text badge placeholders (`'⌘'` and `'มือ'`) with `Image.asset('assets/icons/app_icon.png')` across `LoginScreen`, `LandingScreen`, `ScannerScreen`, and `SettingsScreen`.
 
 ## Next
-- Commit if approved.
-- Note: Frontend/test/.../tsl_stream_service_test.dart (+3 URL tests) and untracked
-  Inference_backend/TSL_Output/{active_model.json,uploads/} were changed by a concurrent
-  session, not this one — do not revert or commit them blindly.
+- [x] Step 1: Copy image to `assets/icons/app_icon.png`, configure `pubspec.yaml` and `flutter_launcher_icons`, and run generator.
+- [x] Step 2: Update `login_screen.dart`, `landing_screen.dart`, `scanner_screen.dart`, `settings_screen.dart` with `Image.asset('assets/icons/app_icon.png')` and verify via `flutter analyze && flutter test`.
 
 ## Constraints
 None stated yet.

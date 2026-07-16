@@ -18,9 +18,9 @@ Flutter mobile client (Android 9+ / iOS 13+): real-time TSL scanner and dictiona
 | `frontend/lib/features/<name>/` | One folder per feature (`auth`, `landing`, `scanner`, `settings`, `learn`) with `presentation/`, `domain/`, `data/` layers |
 | `frontend/lib/features/auth/` | Authentication feature (`authProvider`, `LoginScreen`) supporting live JWT login/signup or offline simulated demo mode. Contains embedded Server IP configuration card (`serverUrl`). |
 | `frontend/lib/features/scanner/data/services/tsl_stream_service.dart` | `TslStreamService` interface + `SimulatedTslStreamService` (demo loop) + `WebSocketTslStreamService` (real client for `<serverUrl>/api/v1/stream` per `docs/api/stream-schema.md`, sends `Authorization: Bearer` from `authProvider` on the WS handshake); provider picks one from the settings `useSimulatedStream` / `serverUrl` fields and the auth access token |
-| `frontend/lib/features/settings/` | App settings view displaying connected Server IP and demo-mode status; persisted via `shared_preferences` behind `sharedPreferencesProvider` (overridden in `main()` and in tests) |
+| `frontend/lib/features/settings/` | App settings view displaying 3-way theme switcher (`ThemeMode.system`, `ThemeMode.dark`, `ThemeMode.light`), connected Server IP, and demo-mode status; persisted via `shared_preferences` behind `sharedPreferencesProvider` (overridden in `main()` and in tests) |
 | `frontend/lib/features/learn/` | Learn tab: TSL dictionary (searchable, category-grouped, `SignAvatar` keypoint animation with procedural fallback) and exercise roadmap (topics -> perform-the-sign exercises, pass at model confidence >= the exercise's admin-set threshold). `LearnRepository` (HTTP `/api/v1/learn/*` + simulated demo variant fully synced with the 150-word Server Dictionary and 8 starter roadmap topics); full-screen practice route `/learn/practice` reuses the scanner camera pipeline |
-| `frontend/pubspec.yaml` | Dependencies (including `google_fonts` / Kanit typography) and app metadata |
+| `frontend/pubspec.yaml` | Dependencies (including `google_fonts` / Kanit typography, `flutter_launcher_icons`), app icon asset (`assets/icons/app_icon.png`), and app metadata |
 | `frontend/test/` | Automated unit and widget tests per feature and core module |
 
 ---

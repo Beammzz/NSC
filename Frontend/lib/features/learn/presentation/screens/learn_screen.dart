@@ -22,19 +22,19 @@ class _LearnScreenState extends ConsumerState<LearnScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.darkNavy,
+      backgroundColor: context.scaffoldBackgroundColor,
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'เรียนรู้ภาษามือ',
                 style: TextStyle(
                   fontSize: 28,
                   fontWeight: FontWeight.w700,
-                  color: AppTheme.textLight,
+                  color: context.textColor,
                 ),
               ),
               const SizedBox(height: 6),
@@ -42,7 +42,7 @@ class _LearnScreenState extends ConsumerState<LearnScreen> {
                 'ฝึกท่าทางตามแบบฝึกหัด หรือค้นหาคำศัพท์จากคลัง',
                 style: TextStyle(
                   fontSize: 14,
-                  color: AppTheme.textMutedDark.withAlpha(220),
+                  color: context.textMutedColor.withAlpha(220),
                 ),
               ),
               const SizedBox(height: 16),
@@ -90,7 +90,7 @@ class _ModeToggle extends StatelessWidget {
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-                color: selected ? Colors.white : AppTheme.textMutedDark,
+                color: selected ? Colors.white : context.textMutedColor,
               ),
             ),
           ),
@@ -101,9 +101,9 @@ class _ModeToggle extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: AppTheme.cardDark,
+        color: context.cardColor,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppTheme.borderDark, width: 1),
+        border: Border.all(color: context.borderColor, width: 1),
       ),
       child: Row(
         children: [
@@ -136,10 +136,10 @@ class _RoadmapView extends ConsumerWidget {
       ),
       data: (topics) {
         if (topics.isEmpty) {
-          return const Center(
+          return Center(
             child: Text(
               'ยังไม่มีแบบฝึกหัด',
-              style: TextStyle(color: AppTheme.textMutedDark),
+              style: TextStyle(color: context.textMutedColor),
             ),
           );
         }
@@ -167,7 +167,7 @@ class _RoadmapView extends ConsumerWidget {
         }
         return RefreshIndicator(
           color: AppTheme.primaryAccent,
-          backgroundColor: AppTheme.cardDark,
+          backgroundColor: context.cardColor,
           onRefresh: () async {
             ref.invalidate(learnTopicsProvider);
             ref.invalidate(learnProgressProvider);
@@ -206,7 +206,7 @@ class _TopicNode extends ConsumerWidget {
         ? AppTheme.successGreen
         : unlocked
         ? AppTheme.primaryAccent
-        : AppTheme.borderDark;
+        : context.borderColor;
 
     return IntrinsicHeight(
       child: Row(
@@ -231,10 +231,10 @@ class _TopicNode extends ConsumerWidget {
                           topic.icon.isEmpty ? '✋' : topic.icon,
                           style: const TextStyle(fontSize: 20),
                         )
-                      : const Icon(
+                      : Icon(
                           Icons.lock_outline,
                           size: 20,
-                          color: AppTheme.textMutedDark,
+                          color: context.textMutedColor,
                         ),
                 ),
                 if (!isLast)
@@ -242,7 +242,7 @@ class _TopicNode extends ConsumerWidget {
                     child: Container(
                       width: 2,
                       margin: const EdgeInsets.symmetric(vertical: 4),
-                      color: AppTheme.borderDark,
+                      color: context.borderColor,
                     ),
                   ),
               ],
@@ -255,10 +255,12 @@ class _TopicNode extends ConsumerWidget {
               margin: const EdgeInsets.only(bottom: 16),
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: AppTheme.cardDark,
+                color: context.cardColor,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
-                  color: unlocked ? accent.withAlpha(120) : AppTheme.borderDark,
+                  color: unlocked
+                      ? accent.withAlpha(120)
+                      : context.borderColor,
                   width: 1,
                 ),
               ),
@@ -274,8 +276,8 @@ class _TopicNode extends ConsumerWidget {
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
                             color: unlocked
-                                ? AppTheme.textLight
-                                : AppTheme.textMutedDark,
+                                ? context.textColor
+                                : context.textMutedColor,
                           ),
                         ),
                       ),
@@ -286,7 +288,7 @@ class _TopicNode extends ConsumerWidget {
                           fontWeight: FontWeight.w600,
                           color: completed
                               ? AppTheme.successGreen
-                              : AppTheme.textMutedDark,
+                              : context.textMutedColor,
                         ),
                       ),
                     ],
@@ -318,7 +320,7 @@ class _TopicNode extends ConsumerWidget {
                       'ผ่านหัวข้อก่อนหน้าเพื่อปลดล็อก',
                       style: TextStyle(
                         fontSize: 12,
-                        color: AppTheme.textMutedDark.withAlpha(180),
+                        color: context.textMutedColor.withAlpha(180),
                       ),
                     ),
                   ],
@@ -366,10 +368,10 @@ class _ExerciseChip extends StatelessWidget {
             const SizedBox(width: 6),
             Text(
               exercise.word,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w500,
-                color: AppTheme.textLight,
+                color: context.textColor,
               ),
             ),
           ],
@@ -399,20 +401,20 @@ class _DictionaryViewState extends ConsumerState<_DictionaryView> {
       children: [
         TextField(
           onChanged: (v) => setState(() => _query = v.trim()),
-          style: const TextStyle(color: AppTheme.textLight),
+          style: TextStyle(color: context.textColor),
           decoration: InputDecoration(
             hintText: 'ค้นหาคำศัพท์…',
-            hintStyle: const TextStyle(color: AppTheme.textMutedDark),
-            prefixIcon: const Icon(Icons.search, color: AppTheme.textMutedDark),
+            hintStyle: TextStyle(color: context.textMutedColor),
+            prefixIcon: Icon(Icons.search, color: context.textMutedColor),
             filled: true,
-            fillColor: AppTheme.cardDark,
+            fillColor: context.cardColor,
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppTheme.borderDark),
+              borderSide: BorderSide(color: context.borderColor),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppTheme.borderDark),
+              borderSide: BorderSide(color: context.borderColor),
             ),
           ),
         ),
@@ -437,10 +439,10 @@ class _DictionaryViewState extends ConsumerState<_DictionaryView> {
                         )
                         .toList();
               if (filtered.isEmpty) {
-                return const Center(
+                return Center(
                   child: Text(
                     'ไม่พบคำศัพท์',
-                    style: TextStyle(color: AppTheme.textMutedDark),
+                    style: TextStyle(color: context.textMutedColor),
                   ),
                 );
               }
@@ -451,7 +453,7 @@ class _DictionaryViewState extends ConsumerState<_DictionaryView> {
               }
               return RefreshIndicator(
                 color: AppTheme.primaryAccent,
-                backgroundColor: AppTheme.cardDark,
+                backgroundColor: context.cardColor,
                 onRefresh: () async {
                   ref.invalidate(dictionaryProvider);
                 },
@@ -464,57 +466,55 @@ class _DictionaryViewState extends ConsumerState<_DictionaryView> {
                         padding: const EdgeInsets.only(top: 12, bottom: 6),
                         child: Text(
                           entry.key.isEmpty ? 'อื่นๆ' : entry.key,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
-                            color: AppTheme.textMutedDark,
+                            color: context.textMutedColor,
                           ),
                         ),
                       ),
                       Container(
                         width: double.infinity,
                         decoration: BoxDecoration(
-                        color: AppTheme.cardDark,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                          color: AppTheme.borderDark,
-                          width: 1,
+                          color: context.cardColor,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: context.borderColor,
+                            width: 1,
+                          ),
                         ),
-                      ),
-                      // ListTile paints ink on the nearest Material; without
-                      // this transparent one it asserts under the decorated
-                      // box above.
-                      child: Material(
-                        type: MaterialType.transparency,
-                        child: Column(
-                          children: [
-                            for (final sign in entry.value)
-                              ListTile(
-                                dense: true,
-                                title: Text(
-                                  sign.word,
-                                  style: const TextStyle(
-                                    fontSize: 15,
-                                    color: AppTheme.textLight,
+                        // ListTile paints ink on the nearest Material; without
+                        // this transparent one it asserts under the decorated
+                        // box above.
+                        child: Material(
+                          type: MaterialType.transparency,
+                          child: Column(
+                            children: [
+                              for (final sign in entry.value)
+                                ListTile(
+                                  dense: true,
+                                  title: Text(
+                                    sign.word,
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      color: context.textColor,
+                                    ),
                                   ),
+                                  trailing: const Icon(
+                                    Icons.sign_language_outlined,
+                                    size: 18,
+                                    color: AppTheme.primaryAccent,
+                                  ),
+                                  onTap: () => _showSignSheet(context, sign),
                                 ),
-                                trailing: Icon(
-                                  sign.hasAnimation
-                                      ? Icons.play_circle_outline
-                                      : Icons.sign_language_outlined,
-                                  size: 18,
-                                  color: AppTheme.primaryAccent,
-                                ),
-                                onTap: () => _showSignSheet(context, sign),
-                              ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
-                    ),
+                    ],
                   ],
-                ],
-              ),
-            );
+                ),
+              );
             },
           ),
         ),
@@ -525,7 +525,7 @@ class _DictionaryViewState extends ConsumerState<_DictionaryView> {
   void _showSignSheet(BuildContext context, DictionarySign sign) {
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: AppTheme.cardDark,
+      backgroundColor: context.cardColor,
       isScrollControlled: true,
       constraints: const BoxConstraints(maxWidth: double.infinity),
       shape: const RoundedRectangleBorder(
@@ -540,18 +540,18 @@ class _DictionaryViewState extends ConsumerState<_DictionaryView> {
             children: [
               Text(
                 sign.word,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 24,
                   fontWeight: FontWeight.w700,
-                  color: AppTheme.textLight,
+                  color: context.textColor,
                 ),
               ),
               const SizedBox(height: 4),
               Text(
                 sign.category,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 13,
-                  color: AppTheme.textMutedDark,
+                  color: context.textMutedColor,
                 ),
               ),
               const SizedBox(height: 12),
@@ -563,7 +563,7 @@ class _DictionaryViewState extends ConsumerState<_DictionaryView> {
                     : 'ภาพจำลองท่าทาง (ยังไม่มีข้อมูลท่าจริงสำหรับคำนี้)',
                 style: TextStyle(
                   fontSize: 12,
-                  color: AppTheme.textMutedDark.withAlpha(200),
+                  color: context.textMutedColor.withAlpha(200),
                 ),
               ),
             ],
@@ -600,7 +600,7 @@ class _ErrorRetry extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(message, style: const TextStyle(color: AppTheme.textMutedDark)),
+          Text(message, style: TextStyle(color: context.textMutedColor)),
           const SizedBox(height: 12),
           ElevatedButton(
             onPressed: onRetry,

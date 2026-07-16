@@ -59,7 +59,7 @@ class _CameraViewportState extends ConsumerState<CameraViewport> {
             Color(0xFF0C141E),
           ],
         ),
-        border: Border.all(color: AppTheme.borderDark, width: 1),
+        border: Border.all(color: context.borderColor, width: 1),
       ),
       clipBehavior: Clip.antiAlias,
       child: LayoutBuilder(
@@ -108,8 +108,10 @@ class _CameraViewportState extends ConsumerState<CameraViewport> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                   decoration: BoxDecoration(
-                    color: AppTheme.darkNavy.withAlpha(200),
-                    border: Border.all(color: AppTheme.borderDark, width: 1),
+                    color: context.isDarkMode
+                        ? AppTheme.darkNavy.withAlpha(200)
+                        : Colors.white.withAlpha(220),
+                    border: Border.all(color: context.borderColor, width: 1),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
@@ -117,7 +119,7 @@ class _CameraViewportState extends ConsumerState<CameraViewport> {
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
-                      color: isDetected ? okColor : AppTheme.textMutedDark,
+                      color: isDetected ? okColor : context.textMutedColor,
                     ),
                   ),
                 ),
@@ -137,15 +139,17 @@ class _CameraViewportState extends ConsumerState<CameraViewport> {
                       width: 38,
                       height: 38,
                       decoration: BoxDecoration(
-                        color: AppTheme.darkNavy.withAlpha(184),
+                        color: context.isDarkMode
+                            ? AppTheme.darkNavy.withAlpha(184)
+                            : Colors.white.withAlpha(220),
                         shape: BoxShape.circle,
-                        border: Border.all(color: AppTheme.borderDark, width: 1),
+                        border: Border.all(color: context.borderColor, width: 1),
                       ),
                       alignment: Alignment.center,
-                      child: const Icon(
+                      child: Icon(
                         Icons.cameraswitch,
                         size: 18,
-                        color: AppTheme.textLight,
+                        color: context.textColor,
                       ),
                     ),
                   ),
@@ -161,15 +165,17 @@ class _CameraViewportState extends ConsumerState<CameraViewport> {
                     width: 38,
                     height: 38,
                     decoration: BoxDecoration(
-                      color: AppTheme.darkNavy.withAlpha(184),
+                      color: context.isDarkMode
+                          ? AppTheme.darkNavy.withAlpha(184)
+                          : Colors.white.withAlpha(220),
                       shape: BoxShape.circle,
-                      border: Border.all(color: AppTheme.borderDark, width: 1),
+                      border: Border.all(color: context.borderColor, width: 1),
                     ),
                     alignment: Alignment.center,
                     child: Icon(
                       state.isScanning ? Icons.pause : Icons.play_arrow,
                       size: 18,
-                      color: AppTheme.textLight,
+                      color: context.textColor,
                     ),
                   ),
                 ),
@@ -237,16 +243,18 @@ class _CameraViewportState extends ConsumerState<CameraViewport> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
       decoration: BoxDecoration(
-        color: AppTheme.darkNavy.withAlpha(200),
-        border: Border.all(color: AppTheme.borderDark, width: 1),
+        color: context.isDarkMode
+            ? AppTheme.darkNavy.withAlpha(200)
+            : Colors.white.withAlpha(220),
+        border: Border.all(color: context.borderColor, width: 1),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Text(
         text,
-        style: const TextStyle(
+        style: TextStyle(
           fontFamily: 'monospace',
           fontSize: 10,
-          color: AppTheme.textMutedDark,
+          color: context.textMutedColor,
         ),
       ),
     );

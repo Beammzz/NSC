@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:signmind/features/settings/domain/models/settings_models.dart';
@@ -8,6 +9,7 @@ final sharedPreferencesProvider = Provider<SharedPreferences>((ref) {
 });
 
 class SettingsNotifier extends Notifier<AppSettings> {
+  static const _keyThemeMode = 'settings.themeMode';
   static const _keyDarkMode = 'settings.isDarkMode';
   static const _keyHandSkeleton = 'settings.showHandSkeleton';
   static const _keyAutoSpeak = 'settings.autoSpeak';
@@ -26,8 +28,22 @@ class SettingsNotifier extends Notifier<AppSettings> {
   AppSettings build() {
     final prefs = ref.watch(sharedPreferencesProvider);
     final initial = AppSettings.initial();
+
+    ThemeMode themeMode = initial.themeMode;
+    final storedThemeStr = prefs.getString(_keyThemeMode);
+    if (storedThemeStr != null) {
+      themeMode = switch (storedThemeStr) {
+        'dark' => ThemeMode.dark,
+        'light' => ThemeMode.light,
+        _ => ThemeMode.system,
+      };
+    } else if (prefs.containsKey(_keyDarkMode)) {
+      final oldDark = prefs.getBool(_keyDarkMode) ?? true;
+      themeMode = oldDark ? ThemeMode.dark : ThemeMode.light;
+    }
+
     return AppSettings(
-      isDarkMode: prefs.getBool(_keyDarkMode) ?? initial.isDarkMode,
+      themeMode: themeMode,
       showHandSkeleton:
           prefs.getBool(_keyHandSkeleton) ?? initial.showHandSkeleton,
       autoSpeak: prefs.getBool(_keyAutoSpeak) ?? initial.autoSpeak,
@@ -46,9 +62,19 @@ class SettingsNotifier extends Notifier<AppSettings> {
     );
   }
 
+  void setThemeMode(ThemeMode mode) {
+    state = state.copyWith(themeMode: mode);
+    final modeStr = switch (mode) {
+      ThemeMode.dark => 'dark',
+      ThemeMode.light => 'light',
+      ThemeMode.system => 'system',
+    };
+    _prefs.setString(_keyThemeMode, modeStr);
+    _prefs.setBool(_keyDarkMode, mode == ThemeMode.dark);
+  }
+
   void toggleDarkMode(bool value) {
-    state = state.copyWith(isDarkMode: value);
-    _prefs.setBool(_keyDarkMode, value);
+    setThemeMode(value ? ThemeMode.dark : ThemeMode.light);
   }
 
   void toggleHandSkeleton(bool value) {

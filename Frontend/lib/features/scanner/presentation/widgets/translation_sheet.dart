@@ -26,8 +26,11 @@ class TranslationSheet extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(12, 12, 12, 8),
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
       decoration: BoxDecoration(
-        color: AppTheme.lightSurface,
+        color: context.isDarkMode ? AppTheme.cardDark : AppTheme.lightSurface,
         borderRadius: BorderRadius.circular(20),
+        border: context.isDarkMode
+            ? Border.all(color: context.borderColor, width: 1)
+            : null,
       ),
       child: SingleChildScrollView(
         child: Column(
@@ -38,12 +41,12 @@ class TranslationSheet extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text(
+                Text(
                   'ผลการแปล',
                   style: TextStyle(
                     fontSize: 11.5,
                     fontWeight: FontWeight.w600,
-                    color: AppTheme.textMutedLight,
+                    color: context.textMutedColor,
                     letterSpacing: 0.2,
                   ),
                 ),
@@ -65,11 +68,11 @@ class TranslationSheet extends StatelessWidget {
             // Current detected word
             Text(
               isDetected ? state.currentWord : (state.isScanning ? '…' : ''),
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 34,
                 fontWeight: FontWeight.w700,
                 height: 1.15,
-                color: AppTheme.textDark,
+                color: context.textColor,
               ),
             ),
             const SizedBox(height: 4),
@@ -81,7 +84,7 @@ class TranslationSheet extends StatelessWidget {
                   child: Container(
                     height: 6,
                     decoration: BoxDecoration(
-                      color: AppTheme.borderLight,
+                      color: context.borderColor,
                       borderRadius: BorderRadius.circular(99),
                     ),
                     alignment: Alignment.centerLeft,
@@ -105,10 +108,10 @@ class TranslationSheet extends StatelessWidget {
                   child: Text(
                     isDetected ? '$confPercent%' : '—',
                     textAlign: TextAlign.right,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontFamily: 'monospace',
                       fontSize: 11,
-                      color: AppTheme.textMutedLight,
+                      color: context.textMutedColor,
                     ),
                   ),
                 ),
@@ -121,27 +124,30 @@ class TranslationSheet extends StatelessWidget {
               constraints: const BoxConstraints(minHeight: 48),
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: Colors.white,
-                border: Border.all(color: AppTheme.borderLight, width: 1),
+                color:
+                    context.isDarkMode ? AppTheme.cardDarkAlt : Colors.white,
+                border: Border.all(color: context.borderColor, width: 1),
                 borderRadius: BorderRadius.circular(12),
               ),
               alignment: Alignment.centerLeft,
               child: state.sentence.isNotEmpty
                   ? Text(
                       state.sentence.join(' '),
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w500,
-                        color: Color(0xFF22456E),
+                        color: context.isDarkMode
+                            ? AppTheme.textLight
+                            : const Color(0xFF22456E),
                         height: 1.4,
                       ),
                     )
-                  : const Text(
+                  : Text(
                       'คำที่แปลได้จะเรียงเป็นประโยคที่นี่',
                       style: TextStyle(
                         fontSize: 13.5,
                         fontWeight: FontWeight.w400,
-                        color: Color(0xFF9DB2CD),
+                        color: context.textMutedColor.withAlpha(200),
                       ),
                     ),
             ),

@@ -101,7 +101,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     final authState = ref.watch(authProvider);
 
     return Scaffold(
-      backgroundColor: AppTheme.darkNavy,
+      backgroundColor: context.scaffoldBackgroundColor,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -136,24 +136,26 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                         ],
                       ),
                       alignment: Alignment.center,
-                      child: const Text(
-                        '⌘',
-                        style: TextStyle(
-                          fontSize: 34,
-                          fontWeight: FontWeight.w800,
-                          color: Colors.white,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(18),
+                        child: Padding(
+                          padding: const EdgeInsets.all(8),
+                          child: Image.asset(
+                            'assets/icons/app_icon.png',
+                            fit: BoxFit.contain,
+                          ),
                         ),
                       ),
                     ),
                   ),
                   const SizedBox(height: 18),
-                  const Text(
+                  Text(
                     'SignMind AI',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 28,
                       fontWeight: FontWeight.w800,
-                      color: AppTheme.textLight,
+                      color: context.textColor,
                       letterSpacing: 0.5,
                     ),
                   ),
@@ -163,7 +165,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 14,
-                      color: AppTheme.textMutedDark.withAlpha(220),
+                      color: context.textMutedColor.withAlpha(220),
                     ),
                   ),
                   const SizedBox(height: 28),
@@ -172,10 +174,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                   Container(
                     padding: const EdgeInsets.all(18),
                     decoration: BoxDecoration(
-                      color: AppTheme.cardDark,
+                      color: context.cardColor,
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
-                        color: AppTheme.borderDark.withAlpha(140),
+                        color: context.borderColor,
                       ),
                     ),
                     child: Column(
@@ -184,15 +186,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Expanded(
+                            Expanded(
                               child: Row(
                                 children: [
-                                  Icon(
+                                  const Icon(
                                     Icons.dns_outlined,
                                     color: AppTheme.primaryAccent,
                                     size: 18,
                                   ),
-                                  SizedBox(width: 8),
+                                  const SizedBox(width: 8),
                                   Flexible(
                                     child: Text(
                                       'ตั้งค่าเซิร์ฟเวอร์ (Server IP)',
@@ -200,7 +202,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                                       style: TextStyle(
                                         fontSize: 14,
                                         fontWeight: FontWeight.w600,
-                                        color: AppTheme.textLight,
+                                        color: context.textColor,
                                       ),
                                     ),
                                   ),
@@ -215,14 +217,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                                 style: TextStyle(
                                   fontSize: 11,
                                   color: _isDemoMode
-                                      ? AppTheme.darkNavy
-                                      : AppTheme.textLight,
+                                      ? Colors.white
+                                      : context.textColor,
                                   fontWeight: FontWeight.w600,
                                 ),
                               ),
                               selected: _isDemoMode,
                               selectedColor: AppTheme.primaryAccent,
-                              backgroundColor: AppTheme.darkNavy,
+                              backgroundColor: context.scaffoldBackgroundColor,
                               onSelected: (val) {
                                 setState(() {
                                   _isDemoMode = val;
@@ -237,22 +239,22 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                             'ที่อยู่เซิร์ฟเวอร์ SignMind Backend (WebSocket / HTTP):',
                             style: TextStyle(
                               fontSize: 12,
-                              color: AppTheme.textMutedDark.withAlpha(200),
+                              color: context.textMutedColor,
                             ),
                           ),
                           const SizedBox(height: 8),
                           TextFormField(
                             key: const Key('loginServerUrlField'),
                             controller: _urlController,
-                            style: const TextStyle(
-                              color: AppTheme.textLight,
+                            style: TextStyle(
+                              color: context.textColor,
                               fontFamily: 'monospace',
                               fontSize: 14,
                             ),
                             decoration: InputDecoration(
                               hintText: 'https://signmind.harumi.dev',
                               hintStyle: TextStyle(
-                                color: AppTheme.textMutedDark.withAlpha(150),
+                                color: context.textMutedColor.withAlpha(150),
                                 fontFamily: 'monospace',
                                 fontSize: 14,
                               ),
@@ -266,11 +268,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                                 vertical: 12,
                               ),
                               filled: true,
-                              fillColor: AppTheme.darkNavy,
+                              fillColor: context.scaffoldBackgroundColor,
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(
-                                  color: AppTheme.borderDark,
+                                borderSide: BorderSide(
+                                  color: context.borderColor,
                                 ),
                               ),
                               focusedBorder: OutlineInputBorder(
@@ -292,7 +294,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                     Container(
                       padding: const EdgeInsets.all(22),
                       decoration: BoxDecoration(
-                        color: AppTheme.cardDark,
+                        color: context.cardColor,
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
                           color: AppTheme.primaryAccent.withAlpha(120),
@@ -306,12 +308,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                             color: AppTheme.primaryAccent,
                           ),
                           const SizedBox(height: 12),
-                          const Text(
+                          Text(
                             'โหมดสาธิตออฟไลน์ (Simulated Mode)',
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w700,
-                              color: AppTheme.textLight,
+                              color: context.textColor,
                             ),
                           ),
                           const SizedBox(height: 6),
@@ -320,7 +322,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               fontSize: 13,
-                              color: AppTheme.textMutedDark.withAlpha(220),
+                              color: context.textMutedColor.withAlpha(220),
                             ),
                           ),
                           const SizedBox(height: 20),
@@ -348,10 +350,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                     Container(
                       padding: const EdgeInsets.all(22),
                       decoration: BoxDecoration(
-                        color: AppTheme.cardDark,
+                        color: context.cardColor,
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                          color: AppTheme.borderDark.withAlpha(140),
+                          color: context.borderColor,
                         ),
                       ),
                       child: Column(
@@ -360,8 +362,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                           TabBar(
                             controller: _tabController,
                             indicatorColor: AppTheme.primaryAccent,
-                            labelColor: AppTheme.textLight,
-                            unselectedLabelColor: AppTheme.textMutedDark,
+                            labelColor: context.textColor,
+                            unselectedLabelColor: context.textMutedColor,
                             labelStyle: const TextStyle(
                               fontWeight: FontWeight.w700,
                               fontSize: 14,
@@ -395,8 +397,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                                   Expanded(
                                     child: Text(
                                       authState.error!,
-                                      style: const TextStyle(
-                                        color: AppTheme.textLight,
+                                      style: TextStyle(
+                                        color: context.textColor,
                                         fontSize: 13,
                                       ),
                                     ),
@@ -410,18 +412,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                             key: const Key('loginEmailField'),
                             controller: _emailController,
                             keyboardType: TextInputType.emailAddress,
-                            style: const TextStyle(color: AppTheme.textLight),
+                            style: TextStyle(color: context.textColor),
                             decoration: InputDecoration(
                               labelText: 'อีเมล (Email)',
                               labelStyle: TextStyle(
-                                color: AppTheme.textMutedDark.withAlpha(200),
+                                color: context.textMutedColor,
                               ),
                               prefixIcon: const Icon(
                                 Icons.email_outlined,
                                 color: AppTheme.primaryAccent,
                               ),
                               filled: true,
-                              fillColor: AppTheme.darkNavy,
+                              fillColor: context.scaffoldBackgroundColor,
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
                               ),
@@ -433,18 +435,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                             key: const Key('loginPasswordField'),
                             controller: _passwordController,
                             obscureText: true,
-                            style: const TextStyle(color: AppTheme.textLight),
+                            style: TextStyle(color: context.textColor),
                             decoration: InputDecoration(
                               labelText: 'รหัสผ่าน (Password)',
                               labelStyle: TextStyle(
-                                color: AppTheme.textMutedDark.withAlpha(200),
+                                color: context.textMutedColor,
                               ),
                               prefixIcon: const Icon(
                                 Icons.lock_outline,
                                 color: AppTheme.primaryAccent,
                               ),
                               filled: true,
-                              fillColor: AppTheme.darkNavy,
+                              fillColor: context.scaffoldBackgroundColor,
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
                               ),
@@ -475,7 +477,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                                       activeColor: AppTheme.primaryAccent,
                                       side: BorderSide(
                                         color:
-                                            AppTheme.textMutedDark.withAlpha(180),
+                                            context.textMutedColor.withAlpha(180),
                                         width: 1.8,
                                       ),
                                       shape: RoundedRectangleBorder(
@@ -491,7 +493,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                                       style: TextStyle(
                                         fontSize: 13,
                                         color:
-                                            AppTheme.textLight.withAlpha(230),
+                                            context.textColor.withAlpha(230),
                                         fontWeight: FontWeight.w500,
                                       ),
                                     ),

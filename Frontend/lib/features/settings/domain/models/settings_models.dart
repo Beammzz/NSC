@@ -1,5 +1,7 @@
+import 'package:flutter/material.dart';
+
 class AppSettings {
-  final bool isDarkMode;
+  final ThemeMode themeMode;
   final bool showHandSkeleton;
   final bool autoSpeak;
   final bool hapticFeedback;
@@ -24,7 +26,7 @@ class AppSettings {
   final String savedPassword;
 
   const AppSettings({
-    required this.isDarkMode,
+    required this.themeMode,
     required this.showHandSkeleton,
     required this.autoSpeak,
     required this.hapticFeedback,
@@ -37,9 +39,11 @@ class AppSettings {
     required this.savedPassword,
   });
 
+  bool get isDarkMode => themeMode == ThemeMode.dark;
+
   factory AppSettings.initial() {
     return const AppSettings(
-      isDarkMode: true,
+      themeMode: ThemeMode.system,
       showHandSkeleton: true,
       autoSpeak: true,
       hapticFeedback: true,
@@ -55,6 +59,7 @@ class AppSettings {
   }
 
   AppSettings copyWith({
+    ThemeMode? themeMode,
     bool? isDarkMode,
     bool? showHandSkeleton,
     bool? autoSpeak,
@@ -68,7 +73,10 @@ class AppSettings {
     String? savedPassword,
   }) {
     return AppSettings(
-      isDarkMode: isDarkMode ?? this.isDarkMode,
+      themeMode: themeMode ??
+          (isDarkMode != null
+              ? (isDarkMode ? ThemeMode.dark : ThemeMode.light)
+              : this.themeMode),
       showHandSkeleton: showHandSkeleton ?? this.showHandSkeleton,
       autoSpeak: autoSpeak ?? this.autoSpeak,
       hapticFeedback: hapticFeedback ?? this.hapticFeedback,
@@ -82,4 +90,5 @@ class AppSettings {
     );
   }
 }
+
 

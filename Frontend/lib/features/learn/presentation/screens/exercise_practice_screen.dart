@@ -117,10 +117,10 @@ class _ExercisePracticeScreenState
         state.currentWord == exercise.word && state.demoPhase != 0;
 
     return Scaffold(
-      backgroundColor: AppTheme.darkNavy,
+      backgroundColor: context.scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: AppTheme.darkNavy,
-        foregroundColor: AppTheme.textLight,
+        backgroundColor: context.scaffoldBackgroundColor,
+        foregroundColor: context.textColor,
         elevation: 0,
         title: Text(
           widget.topicTitle,
@@ -135,9 +135,9 @@ class _ExercisePracticeScreenState
               margin: const EdgeInsets.fromLTRB(12, 4, 12, 12),
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: AppTheme.cardDark,
+                color: context.cardColor,
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppTheme.borderDark, width: 1),
+                border: Border.all(color: context.borderColor, width: 1),
               ),
               child: Row(
                 children: [
@@ -149,16 +149,16 @@ class _ExercisePracticeScreenState
                           'ทำท่าภาษามือคำว่า',
                           style: TextStyle(
                             fontSize: 12,
-                            color: AppTheme.textMutedDark.withAlpha(220),
+                            color: context.textMutedColor.withAlpha(220),
                           ),
                         ),
                         const SizedBox(height: 2),
                         Text(
                           exercise.word,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 26,
                             fontWeight: FontWeight.w700,
-                            color: AppTheme.textLight,
+                            color: context.textColor,
                           ),
                         ),
                       ],
@@ -240,7 +240,7 @@ class _LiveFeedback extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final statusColor =
-        isMatch ? AppTheme.successGreen : AppTheme.textMutedDark;
+        isMatch ? AppTheme.successGreen : context.textMutedColor;
     final statusText = !isScanning
         ? 'กล้องหยุดชั่วคราว — แตะปุ่มบนกล้องเพื่อสแกนต่อ'
         : isMatch
@@ -252,9 +252,9 @@ class _LiveFeedback extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppTheme.cardDark,
+        color: context.cardColor,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.borderDark, width: 1),
+        border: Border.all(color: context.borderColor, width: 1),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -275,7 +275,7 @@ class _LiveFeedback extends StatelessWidget {
             child: LinearProgressIndicator(
               value: (bestConfidence / threshold).clamp(0.0, 1.0),
               minHeight: 8,
-              backgroundColor: AppTheme.borderDark,
+              backgroundColor: context.borderColor,
               valueColor: AlwaysStoppedAnimation<Color>(
                 bestConfidence >= threshold
                     ? AppTheme.successGreen
@@ -286,9 +286,9 @@ class _LiveFeedback extends StatelessWidget {
           const SizedBox(height: 6),
           Text(
             'ดีที่สุด ${(bestConfidence * 100).round()}% / เกณฑ์ ${(threshold * 100).round()}%',
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 12,
-              color: AppTheme.textMutedDark,
+              color: context.textMutedColor,
             ),
           ),
         ],
@@ -326,10 +326,10 @@ class _PassedCard extends StatelessWidget {
           const SizedBox(height: 10),
           Text(
             'ผ่านแล้ว! "$word" ${(confidence * 100).round()}%',
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w700,
-              color: AppTheme.textLight,
+              color: context.textColor,
             ),
           ),
           const SizedBox(height: 14),

@@ -57,10 +57,10 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
         : 'หยุดชั่วคราว';
     final dotColor = state.isScanning
         ? AppTheme.liveDotGreen
-        : AppTheme.textMutedDark;
+        : context.textMutedColor;
 
     return Scaffold(
-      backgroundColor: AppTheme.darkNavy,
+      backgroundColor: context.scaffoldBackgroundColor,
       body: SafeArea(
         child: Column(
           children: [
@@ -80,12 +80,14 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
                           borderRadius: BorderRadius.circular(10),
                         ),
                         alignment: Alignment.center,
-                        child: const Text(
-                          'มือ',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Padding(
+                            padding: const EdgeInsets.all(3),
+                            child: Image.asset(
+                              'assets/icons/app_icon.png',
+                              fit: BoxFit.contain,
+                            ),
                           ),
                         ),
                       ),
@@ -93,20 +95,20 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
+                          Text(
                             'SignMind AI',
                             style: TextStyle(
                               fontSize: 15,
                               fontWeight: FontWeight.w700,
                               height: 1.2,
-                              color: AppTheme.textLight,
+                              color: context.textColor,
                             ),
                           ),
                           Text(
                             'สแกนและแปลภาษามือไทย',
                             style: TextStyle(
                               fontSize: 11,
-                              color: AppTheme.textMutedDark.withAlpha(220),
+                              color: context.textMutedColor.withAlpha(220),
                               height: 1.2,
                             ),
                           ),
@@ -123,9 +125,9 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
                         key: const Key('openLandingButton'),
                         tooltip: 'ศูนย์แนะนำฟีเจอร์ระบบ',
                         onPressed: () => context.go('/landing'),
-                        icon: const Icon(
+                        icon: Icon(
                           Icons.info_outline,
-                          color: AppTheme.textMutedDark,
+                          color: context.textMutedColor,
                           size: 20,
                         ),
                       ),
@@ -136,7 +138,7 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
                         decoration: BoxDecoration(
                           color: AppTheme.primaryAccent.withAlpha(46),
                           border: Border.all(
-                            color: AppTheme.textMutedDark.withAlpha(89),
+                            color: context.textMutedColor.withAlpha(89),
                             width: 1,
                           ),
                           borderRadius: BorderRadius.circular(99),
@@ -157,10 +159,12 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
                             const SizedBox(width: 6),
                             Text(
                               liveLabel,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 11.5,
                                 fontWeight: FontWeight.w600,
-                                color: Color(0xFFCFE1F8),
+                                color: context.isDarkMode
+                                    ? const Color(0xFFCFE1F8)
+                                    : context.textColor,
                               ),
                             ),
                           ],
