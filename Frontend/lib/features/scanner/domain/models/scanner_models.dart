@@ -25,10 +25,19 @@ class RawLandmarkFrame {
   final List<LandmarkPoint> rightHand;
   final List<LandmarkPoint> upperPose;
 
+  /// Pixel dimensions of the upright analysis image the normalized landmark
+  /// coordinates refer to. Null when the source doesn't report them (the
+  /// simulated feed); the overlay then maps points across the full viewport
+  /// instead of replicating the preview's cover-crop.
+  final int? imageWidth;
+  final int? imageHeight;
+
   const RawLandmarkFrame({
     required this.leftHand,
     required this.rightHand,
     required this.upperPose,
+    this.imageWidth,
+    this.imageHeight,
   });
 }
 

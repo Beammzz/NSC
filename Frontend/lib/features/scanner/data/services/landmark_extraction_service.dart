@@ -88,7 +88,8 @@ class SimulatedLandmarkExtractionService implements LandmarkExtractionService {
 /// Name of the [EventChannel] the native Android MediaPipe pipeline (Stage B/B3)
 /// streams landmark frames on. Each event is a map:
 ///   { 'pose': [x,y,z * 33] | [], 'hands': [ {'handedness': 'Left'|'Right',
-///     'landmarks': [x,y,z * 21]}, ... up to 2 ] }
+///     'landmarks': [x,y,z * 21]}, ... up to 2 ],
+///     'width': `analysis image px`, 'height': `analysis image px` }
 /// with MediaPipe normalized image coordinates (x,y in 0..1, z relative depth).
 const landmarkEventChannelName = 'signmind/landmarks';
 
@@ -156,7 +157,15 @@ RawLandmarkFrame parseFullFrame(dynamic event) {
     }
   }
 
-  return RawLandmarkFrame(leftHand: left, rightHand: right, upperPose: upperPose);
+  final width = event['width'];
+  final height = event['height'];
+  return RawLandmarkFrame(
+    leftHand: left,
+    rightHand: right,
+    upperPose: upperPose,
+    imageWidth: width is int && width > 0 ? width : null,
+    imageHeight: height is int && height > 0 ? height : null,
+  );
 }
 
 /// Real on-device landmark extraction backed by the native MediaPipe pipeline

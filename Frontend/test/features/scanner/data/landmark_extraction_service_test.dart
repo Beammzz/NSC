@@ -121,6 +121,30 @@ void main() {
       expect(parseFullFrame(null).rightHand, isEmpty);
     });
 
+    test('parses analysis image dimensions; invalid or absent become null', () {
+      final frame = parseFullFrame({
+        'pose': <double>[],
+        'hands': <dynamic>[],
+        'width': 480,
+        'height': 640,
+      });
+      expect(frame.imageWidth, 480);
+      expect(frame.imageHeight, 640);
+
+      final noDims = parseFullFrame({'pose': <double>[], 'hands': <dynamic>[]});
+      expect(noDims.imageWidth, isNull);
+      expect(noDims.imageHeight, isNull);
+
+      final badDims = parseFullFrame({
+        'pose': <double>[],
+        'hands': <dynamic>[],
+        'width': 0,
+        'height': 'x',
+      });
+      expect(badDims.imageWidth, isNull);
+      expect(badDims.imageHeight, isNull);
+    });
+
     test('a hand without 21 points is dropped', () {
       final frame = parseFullFrame({
         'hands': [

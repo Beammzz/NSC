@@ -131,7 +131,9 @@ class _SignAvatarPainter extends CustomPainter {
       }
       // Any extra points (hand keypoints) render as smaller dots.
       for (var i = 7; i < points.length; i++) {
-        canvas.drawCircle(toOffset(points[i]), 2.6, nodeFill);
+        final c = toOffset(points[i]);
+        canvas.drawCircle(c, 2.6, nodeFill);
+        canvas.drawCircle(c, 2.6, nodeStroke);
       }
     } else {
       // Unknown layout (e.g. sparse server stub frames): plain dots.

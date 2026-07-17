@@ -127,6 +127,21 @@ Cause chain: permanent 60Hz blink anim (scanner_screen.dart) + hybrid-compositio
 view merging raster onto main thread -> GPU contention with MediaPipe; plus heavy
 pose_landmarker_full model.
 
+## Failed attempts (2026-07-17 signing-fps bug)
+- ATTEMPT 1 [L1]: pose moved off hand critical path (own executor, 250ms cadence, GPU) +
+  overlay cover-crop fix -> idle scene 11.6fps OK, but user signing still ~6fps (chip 4).
+  Logcat while signing: hand=143-244ms exactly when pose ms=79-128 overlapped on GPU;
+  hand alone ~100ms. GPU contention replaced the emit stall — net zero.
+- ATTEMPT 2 [L2, hypothesis: Adreno 619 serializes concurrent hand+pose GPU work]:
+  pose -> Delegate.CPU (GPU hand-exclusive), cadence kept 250ms. RESULT (2026-07-17 00:57,
+  real server, person + one hand raised): 97 frames/12s = 8.1fps (was 5.9), chip 7 (was 4),
+  pose CPU 44-81ms, hand 77-169ms. Overlay alignment VERIFIED by screenshot (nose dot on
+  nose, hand skeleton on palm). REMAINING CEILING: one-hand-visible with numHands=2 makes
+  MediaPipe re-run palm detection EVERY frame (searching the empty 2nd slot) -> hand
+  ~130-170ms; two-hands-tracked is cheaper (~90ms). ~8fps is the floor without a pipeline
+  redesign (LIVE_STREAM overlap est. +1fps) or model-level change. 12fps only holds when
+  both hand slots are tracked or no hands present.
+
 ## Failed attempts
 - ATTEMPT 1 [L1]: removed 60Hz blink anim (Timer 700ms toggle) + swapped pose full->lite
   -> pose 46-180ms -> 31-52ms, UI rasters 33->20.5/s, but hand still ~85ms and fps still 7.2
@@ -182,7 +197,26 @@ Fix the 4 high-priority findings from the JWT auth review of commit f06309e:
 3. Logout clears signmind_refresh with its real path (/api/v1/auth/).
 4. Trust X-Forwarded-For only when SIGNMIND_TRUST_PROXY=true; bound RateLimiter memory.
 
-## Now
+## Goal (2026-07-17): scanner pose-map + fps fix
+User report: hand overlay fine, pose overlay map wrong, 5-6 fps while signing; emit waited on
+hand+pose sequentially. Two causes fixed:
+1. Overlay geometry: painter stretched normalized coords across the viewport, ignoring
+   PreviewView FILL_CENTER cover-crop -> pose (spans whole body) visibly off, hands (center)
+   fine. Native now emits upright analysis width/height in the landmark payload; painter
+   replicates the cover transform (falls back to stretch when dims absent — simulated feed).
+2. Pose off the hand critical path: PoseLandmarker moved to its own executor + frame copy,
+   cadence 250ms (~4x/s, was stride-6 ≈ <=2x/s and inline — emission stalled 35-45ms on stride
+   frames and pose skeleton lagged up to ~1s at low fps). Emission pairs each hand result with
+   the latest completed pose.
+Files: CameraPreviewView.kt, landmark_extraction_service.dart, scanner_models.dart,
+camera_viewport.dart, landmark_extraction_service_test.dart (+dims test).
+Verified 2026-07-17: flutter analyze clean; flutter test 51/51; release APK built + installed
+on Redmi Note 12 5G; 12s logcat = 139 frames = 11.6fps sustained, pose 44 runs/12s = 3.7Hz on
+own thread (74-99ms, overlapped), no errors. NOT yet verified: fps + overlay alignment with a
+PERSON SIGNING in frame (two-hand worst case) — needs the user in front of the camera.
+Uncommitted. Shorebird OTA deliberately NOT run (changes unverified by user).
+
+## Prior goal: app icon (done)
 Completed app icon update and installation across both native mobile launcher and Flutter UI screens (`inside the app`). Copied the user-provided sign-language outline icon over `assets/icons/app_icon.png`, regenerated native Android/iOS launcher icons (`dart run flutter_launcher_icons`), built release APK (`flutter build apk`), and installed to connected phone via `adb install -r`.
 
 ## Next

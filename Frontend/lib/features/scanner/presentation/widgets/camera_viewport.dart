@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -376,11 +378,31 @@ class _LandmarkOverlayPainter extends CustomPainter {
       ..strokeWidth = 2.2
       ..style = PaintingStyle.stroke;
 
-    // Landmarks are normalized 0..1 in the camera image; map across the full
-    // overlay so the skeleton tracks the real body in the preview. On the
-    // mirrored (front) preview, flip x so the skeleton lines up with the body.
-    Offset toOffset(LandmarkPoint pt) =>
-        Offset((mirror ? 1.0 - pt.x : pt.x) * size.width, pt.y * size.height);
+    // Landmarks are normalized 0..1 in the analysis image. PreviewView
+    // cover-fits (FILL_CENTER) that image into the viewport — it scales to
+    // fill and center-crops the overflow — so the overlay must apply the same
+    // transform or points away from the center drift (the pose skeleton spans
+    // the whole body and visibly misaligned; hands sit near the center where
+    // the error is small). Falls back to a plain stretch when the source
+    // doesn't report image dimensions (simulated feed). On the mirrored
+    // (front) preview, flip x so the skeleton lines up with the body.
+    final iw = f.imageWidth;
+    final ih = f.imageHeight;
+    double displayW = size.width;
+    double displayH = size.height;
+    double offsetX = 0.0;
+    double offsetY = 0.0;
+    if (iw != null && ih != null) {
+      final scale = math.max(size.width / iw, size.height / ih);
+      displayW = iw * scale;
+      displayH = ih * scale;
+      offsetX = (size.width - displayW) / 2.0;
+      offsetY = (size.height - displayH) / 2.0;
+    }
+    Offset toOffset(LandmarkPoint pt) => Offset(
+          (mirror ? 1.0 - pt.x : pt.x) * displayW + offsetX,
+          pt.y * displayH + offsetY,
+        );
 
     void drawSkeleton(
       List<LandmarkPoint> pts,

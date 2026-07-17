@@ -103,6 +103,7 @@ repository split and are not yet rebuilt; recreate them under
 - Real-time recognition (scanner) extracts pose + hand landmarks locally and streams feature vectors via WebSocket to the Golang backend. The feature vector layout is defined in the Feature Vector Spec above — do not restate numbers here.
 - Text-to-Speech (TTS) runs on-device on the mobile client.
 - **Testing & Debugging Mandate**: During debugging or testing, check `adb devices` for connected devices. If no device is connected, build an APK (`flutter build apk`) for the user to test instead.
+- **OTA Release Mandate**: When building the app for updates or release, make it release via OTA using Shorebird (`shorebird patch`).
 - **Admin UI Access**: Accessible via `127.0.0.1:8080` or `signmind.harumi.dev` (Agent test credentials — email: `agent@example.com`, password: `Agent123`).
 - **Verification Mandate**: Whenever Flutter code is touched, the Agent MUST run `flutter analyze` and `flutter test`.
 - **Test Creation Mandate**: When developing a new feature, the Agent MUST create a corresponding test file so that future bug fixes cause less damage to production.
@@ -212,6 +213,7 @@ Before marking any task done:
 - Model optimization: INT8 / FP16 quantization for server serving
 - Commit style: Conventional Commits
 - Mobile testing & debugging: check `adb devices` for connected devices; if none connected, build an APK for the user to test instead
+- App release / OTA updates: when building the app, make it release via OTA using Shorebird (`shorebird patch`)
 - Admin UI access: `127.0.0.1:8080` or `signmind.harumi.dev` (Agent email: `agent@example.com`, password: `Agent123`)
 
 ---
