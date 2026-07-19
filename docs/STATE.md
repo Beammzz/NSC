@@ -127,6 +127,51 @@ Cause chain: permanent 60Hz blink anim (scanner_screen.dart) + hybrid-compositio
 view merging raster onto main thread -> GPU contention with MediaPipe; plus heavy
 pose_landmarker_full model.
 
+## Goal addendum (2026-07-19): recognition quality bug
+User: app doesn't recognize signs (e.g. รัก/Love) that tsl_live_inference.py recognizes;
+confidence numbers look confident-but-wrong. CAUSE (hypothesis, strongest code mismatch):
+mobile used pose_landmarker_LITE while training + tsl_live_inference.py:73 use FULL; every
+feature is normalized by 3D shoulder width incl. z, lite z noisier -> whole 147-vector scale
+wobble the model never saw. Secondary: pose refreshed 4x/s on mobile (Python: every frame) ->
+steppy pose velocity features. Ruled out: mirroring (both unmirrored), handedness mapping,
+hand model file, min-confidence defaults, fps (server resamples onto 12fps grid,
+engine.py InferenceSession/resample_window). FIX: restored pose_landmarker_full.task from
+git (cbf8840) into android assets, POSE_MODEL -> full (CPU executor, 250ms cadence).
+pose_landmarker_lite.task left in assets (deletion needs user approval; +9.4MB APK).
+RESULT 2026-07-19 14:40 (real server, user signing ILY on front camera): รัก recognized —
+sentence "ถูก รัก ถูก รัก ถูก รัก" on screen; overlay aligned (hand skeleton on hand, nose dot
+on nose). pose full CPU 58-102ms @ ~2.4Hz effective (in-flight guard), hand 161-175ms while
+signing, ~6-8fps. APK 56.0MB (both pose models shipped; lite deletable with user approval).
+Open: ถูก interleaves during transitions (model behavior, not pipeline); one-hand fps floor
+~8 stands unless two-instance numHands scheme is built.
+
+## Goal (2026-07-19 PM): one-hand fps + perf/accuracy round
+User approved: delete pose_landmarker_lite.task; fix one-hand fps ceiling; improve perf +
+accuracy. Changes (CameraPreviewView.kt only):
+1. Dual HandLandmarker: solo numHands=1 instance tracks when exactly 1 hand tracked
+   (skips the every-frame palm re-detection that cost 130-170ms); numHands=2 instance
+   probes every HAND_PROBE_INTERVAL_MS=500ms (worst-case 2nd-hand pickup delay) and
+   handles 0/2-hand frames. Separate VIDEO-mode timestamp streams per instance.
+   detectHands() owns routing; log line now includes hands=N.
+2. POSE_INTERVAL_MS 250 -> 150 (~6x/s; training/reference run pose every frame —
+   smaller pose-hold steps in the feature stream).
+3. toUprightBitmap: rotation now draws into reused rotatedBitmap (was per-frame
+   Bitmap.createBitmap allocation).
+4. pose_landmarker_lite.task git rm'd (user-approved); APK should drop ~5.8MB to ~50MB.
+RESULT 2026-07-19 15:05 (partial): release build exit 0, APK 50.5MB (was 56.0), installed.
+On-device 15s logcat x2 (back + front camera, NOBODY in frame): 187-189 frames/15s =
+12.5fps cap holds, hands=0 all frames (2-hand instance path = old behavior, no regression),
+pose full CPU 59-116ms at 88 runs/15s = 5.9Hz (was 2.4Hz), 0 error/exception tokens,
+scanner streamed to real server (chip 12-13 FPS, latency 0.035-0.179s).
+RESULT 2026-07-19 16:5x (user in frame, real server signmind.harumi.dev):
+- One-hand (perf4.log, 18s): 154 hands=1 frames, hand p50 69ms (was 130-170ms — solo
+  instance works), fps chip mode 10-11 peaking 13 (was ~8). DONE-WHEN >=10 MET.
+- Two-hand (perf3.log, 30s): hands=2 all frames, hand p50 87ms, settled 10fps (was 8.8).
+- Recognition: ฉัน 97% confidence, sentence "ถูก เรียน ดื่ม ชา มา ฉัน" building; overlay
+  aligned (screenshot scanner3.png). Pose 78 runs/18s = 4.3Hz under load (110-145ms).
+- 0 error/exception tokens across all captures.
+GOAL ACHIEVED; everything uncommitted; shorebird not run (both need user's word).
+
 ## Failed attempts (2026-07-17 signing-fps bug)
 - ATTEMPT 1 [L1]: pose moved off hand critical path (own executor, 250ms cadence, GPU) +
   overlay cover-crop fix -> idle scene 11.6fps OK, but user signing still ~6fps (chip 4).
@@ -225,7 +270,12 @@ Completed app icon update and installation across both native mobile launcher an
 - [x] Step 3: Replace `app_icon.png` with provided sign-language outline icon, regenerate `flutter_launcher_icons`, rebuild release APK (`app-release.apk`), and install via `adb`.
 
 ## Constraints
-None stated yet.
+- Do not git push (user has never asked for a push).
+- Do not commit until the user asks; whole tree deliberately uncommitted.
+- Shorebird OTA (`shorebird patch`) only when the user says they are satisfied.
+- Never delete files without pasting what will be lost and getting approval in-conversation.
+- 2026-07-19 user: "Delete lite model and also do Anything that will fix the low fps
+  problem and also improve the app performance and Accuracy" (lite-model deletion approved).
 
 ## Open items
 - Medium/minor review findings deliberately NOT in scope: Flutter token refresh/persistence,

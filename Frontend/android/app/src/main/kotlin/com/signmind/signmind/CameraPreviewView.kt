@@ -18,6 +18,7 @@ import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import com.google.mediapipe.framework.image.BitmapImageBuilder
+import com.google.mediapipe.framework.image.MPImage
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.vision.core.RunningMode
@@ -33,7 +34,8 @@ import java.util.concurrent.Executors
 /**
  * Native CameraX preview + MediaPipe analysis behind the Flutter scanner overlay
  * (Stage B3). A single camera session drives both the [PreviewView] and an
- * [ImageAnalysis] use case that runs HandLandmarker (2 hands) per frame plus
+ * [ImageAnalysis] use case that runs HandLandmarker per frame (a 2-hand
+ * instance, with a 1-hand fast tracker while exactly one hand is visible) plus
  * PoseLandmarker (1 pose) on its own executor at a fixed cadence, and streams
  * the raw normalized landmarks to Dart via [LandmarkStreamHandler]. The Dart
  * side assembles the 147-dim feature vector.
@@ -54,11 +56,22 @@ class CameraPreviewView(
     private var poseLandmarker: PoseLandmarker? = null
     private var lastTimestampMs = 0L
 
+    // Second HandLandmarker with numHands=1: with numHands=2 and only one hand
+    // visible, MediaPipe re-runs palm detection EVERY frame searching the empty
+    // slot (~130-170ms/frame measured 2026-07-17 on Adreno 619) — the one-hand
+    // fps ceiling. Tracking the lone hand on this instance skips that; the
+    // 2-hand instance still runs as a probe every HAND_PROBE_INTERVAL_MS so a
+    // second hand entering the frame is picked up within that window.
+    private var handLandmarkerSolo: HandLandmarker? = null
+    private var soloTimestampMs = 0L // solo instance's own VIDEO-mode timestamp stream
+    private var trackedHandCount = 0 // analysis thread only
+    private var nextProbeDueMs = 0L // analysis thread only
+
     // Pose feeds only the slow-moving body normalization + torso overlay, so it
     // runs OFF the hand critical path: at most every POSE_INTERVAL_MS, on its
     // own executor, on its own copy of the frame. Emission never waits for it —
     // each emitted frame carries the latest completed pose result. This also
-    // refreshes pose ~4x/s instead of the old every-6th-frame stride, which at
+    // refreshes pose ~6x/s instead of the old every-6th-frame stride, which at
     // low frame rates left the pose skeleton up to ~1s behind the body.
     private val poseExecutor: ExecutorService = Executors.newSingleThreadExecutor()
 
@@ -83,6 +96,10 @@ class CameraPreviewView(
     // allocated once and overwritten per frame (detectForVideo is synchronous,
     // nothing holds it across frames).
     private var reusableBitmap: Bitmap? = null
+
+    // Upright (rotated) frame, also allocated once: Bitmap.createBitmap with a
+    // rotation matrix allocated a full frame per analyzed frame (GC churn).
+    private var rotatedBitmap: Bitmap? = null
 
     // Drops frames that arrive while the previous one is still being analyzed so
     // the executor queue never backs up (STRATEGY_KEEP_ONLY_LATEST + this guard).
@@ -167,9 +184,7 @@ class CameraPreviewView(
             // over-smooth ~70x, so the pose skeleton trailed the body. Feed real
             // elapsed milliseconds instead (guarded to stay strictly increasing).
             val nowMs = SystemClock.elapsedRealtime()
-            val ts = if (nowMs > lastTimestampMs) nowMs else lastTimestampMs + 1
-            lastTimestampMs = ts
-            val handResult = handLandmarker?.detectForVideo(mpImage, ts)
+            val handResult = detectHands(mpImage, nowMs)
             val t2 = SystemClock.elapsedRealtime()
             // Pose runs on its own executor (see maybeSubmitPose); the emitted
             // frame pairs this hand result with the latest completed pose so
@@ -183,7 +198,7 @@ class CameraPreviewView(
                 frameTimestamps.removeFirst()
             }
             val fps = frameTimestamps.size
-            Log.d(TAG, "frame ms: bitmap=${t1 - t0} hand=${t2 - t1} total=${t2 - t0} fps=$fps")
+            Log.d(TAG, "frame ms: bitmap=${t1 - t0} hand=${t2 - t1} hands=$trackedHandCount total=${t2 - t0} fps=$fps")
         } catch (e: Exception) {
             // A dropped/garbled frame just skips one overlay update, but never
             // silently: a per-frame throw here otherwise looks like a dead feed.
@@ -192,6 +207,38 @@ class CameraPreviewView(
             analyzing = false
             image.close()
         }
+    }
+
+    /**
+     * Runs on the analysis thread: routes the frame to the cheap 1-hand tracker
+     * while exactly one hand is tracked, falling back to the 2-hand instance
+     * otherwise — and as a periodic probe (every HAND_PROBE_INTERVAL_MS) so a
+     * second hand entering the frame is picked up within that window. Each
+     * instance keeps its own strictly-increasing VIDEO-mode timestamp stream.
+     */
+    private fun detectHands(mpImage: MPImage, nowMs: Long): HandLandmarkerResult? {
+        val solo = handLandmarkerSolo
+        val useSolo = solo != null && trackedHandCount == 1 && nowMs < nextProbeDueMs
+        val result = if (useSolo) {
+            val ts = if (nowMs > soloTimestampMs) nowMs else soloTimestampMs + 1
+            soloTimestampMs = ts
+            solo?.detectForVideo(mpImage, ts)
+        } else {
+            val ts = if (nowMs > lastTimestampMs) nowMs else lastTimestampMs + 1
+            lastTimestampMs = ts
+            handLandmarker?.detectForVideo(mpImage, ts)
+        }
+        val count = result?.landmarks()?.size ?: 0
+        if (count == 1) {
+            // A 2-hand run (initial detection or an expired-window probe) that
+            // sees exactly one hand arms/re-arms the solo window; solo runs
+            // ride out the window they were given.
+            if (!useSolo) nextProbeDueMs = nowMs + HAND_PROBE_INTERVAL_MS
+        } else {
+            nextProbeDueMs = 0L // 0 or 2 hands: the 2-hand instance takes every frame
+        }
+        trackedHandCount = count
+        return result
     }
 
     /**
@@ -246,23 +293,31 @@ class CameraPreviewView(
         // 12fps cap.
         if (handLandmarker == null) {
             handLandmarker = try {
-                buildHandLandmarker(Delegate.GPU)
+                buildHandLandmarker(Delegate.GPU, numHands = 2)
             } catch (e: Exception) {
                 Log.w(TAG, "HandLandmarker GPU delegate unavailable, using CPU", e)
-                buildHandLandmarker(Delegate.CPU)
+                buildHandLandmarker(Delegate.CPU, numHands = 2)
+            }
+        }
+        if (handLandmarkerSolo == null) {
+            handLandmarkerSolo = try {
+                buildHandLandmarker(Delegate.GPU, numHands = 1)
+            } catch (e: Exception) {
+                Log.w(TAG, "solo HandLandmarker GPU delegate unavailable, using CPU", e)
+                buildHandLandmarker(Delegate.CPU, numHands = 1)
             }
         }
         // Pose runs on CPU on purpose: it executes concurrently with hand (own
         // executor), and on the GPU the two contend — measured 2026-07-17 while
         // signing: hand inflated 143-244ms (vs ~100ms alone) whenever a ~100ms
         // GPU pose overlapped, capping the pipeline at ~6fps. CPU/XNNPACK pose
-        // costs a few big-core bursts 4x/s but leaves the GPU hand-exclusive.
+        // costs a few big-core bursts ~6x/s but leaves the GPU hand-exclusive.
         if (poseLandmarker == null) {
             poseLandmarker = buildPoseLandmarker(Delegate.CPU)
         }
     }
 
-    private fun buildHandLandmarker(delegate: Delegate): HandLandmarker =
+    private fun buildHandLandmarker(delegate: Delegate, numHands: Int): HandLandmarker =
         HandLandmarker.createFromOptions(
             context,
             HandLandmarker.HandLandmarkerOptions.builder()
@@ -273,7 +328,7 @@ class CameraPreviewView(
                         .build(),
                 )
                 .setRunningMode(RunningMode.VIDEO)
-                .setNumHands(2)
+                .setNumHands(numHands)
                 .build(),
         )
 
@@ -352,8 +407,20 @@ class CameraPreviewView(
         bitmap.copyPixelsFromBuffer(planes[0].buffer)
         val rotation = imageInfo.rotationDegrees
         if (rotation == 0) return bitmap
-        val matrix = Matrix().apply { postRotate(rotation.toFloat()) }
-        return Bitmap.createBitmap(bitmap, 0, 0, width, height, matrix, true)
+        val outW = if (rotation % 180 == 0) width else height
+        val outH = if (rotation % 180 == 0) height else width
+        val out = rotatedBitmap?.takeIf { it.width == outW && it.height == outH }
+            ?: Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
+                .also { rotatedBitmap = it }
+        // Rotate about the center, then shift into the output's frame. 90°
+        // multiples are pixel-exact, so no filtering paint is needed.
+        val matrix = Matrix().apply {
+            postTranslate(-width / 2f, -height / 2f)
+            postRotate(rotation.toFloat())
+            postTranslate(outW / 2f, outH / 2f)
+        }
+        Canvas(out).drawBitmap(bitmap, matrix, null)
+        return out
     }
 
     override fun getView(): View = previewView
@@ -367,6 +434,10 @@ class CameraPreviewView(
                 handLandmarker?.close()
             } catch (_: Exception) {}
             handLandmarker = null
+            try {
+                handLandmarkerSolo?.close()
+            } catch (_: Exception) {}
+            handLandmarkerSolo = null
         }
         // Pose closes on its own executor so the close queues behind any
         // in-flight detect instead of racing it.
@@ -383,13 +454,23 @@ class CameraPreviewView(
     companion object {
         private const val TAG = "SignMindCamera"
         private const val HAND_MODEL = "hand_landmarker.task"
-        // Lite variant on purpose: pose only feeds the slow-moving torso
-        // normalization + overlay, and full cost 46-180ms/frame on the GPU of
-        // a Redmi Note 12 5G vs ~15-40ms for lite.
-        private const val POSE_MODEL = "pose_landmarker_lite.task"
-        // Pose refreshes ~4x/s on its own executor — enough for the
-        // slow-moving torso normalization + overlay it feeds.
-        private const val POSE_INTERVAL_MS = 250L
+        // FULL variant on purpose, matching training and tsl_live_inference.py:
+        // every feature is normalized by the 3D shoulder width (z included),
+        // and lite's noisier z rescaled the whole vector in ways the model
+        // never saw — confidently-wrong predictions on-device while the Python
+        // reference recognized the same signs. Full is affordable now that
+        // pose runs ~6x/s on the CPU executor instead of inline per frame.
+        private const val POSE_MODEL = "pose_landmarker_full.task"
+        // Pose refresh cadence. Training and tsl_live_inference.py run pose
+        // EVERY frame, so pose values that hold then jump are a distribution
+        // the model never saw; ~6x/s halves the step size vs the old 250ms
+        // (pose CPU run is 58-102ms and the in-flight guard serializes, so
+        // this stays comfortably off saturation).
+        private const val POSE_INTERVAL_MS = 150L
+        // How long the 1-hand fast tracker may run before the 2-hand instance
+        // probes for a second hand — also the worst-case pickup delay when a
+        // second hand enters the frame.
+        private const val HAND_PROBE_INTERVAL_MS = 500L
         private const val TARGET_FPS = 12
         private const val FRAME_INTERVAL_MS = 1000L / TARGET_FPS
     }
