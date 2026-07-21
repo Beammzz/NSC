@@ -12,7 +12,7 @@ void main() {
     GoogleFonts.config.allowRuntimeFetching = false;
   });
 
-  testWidgets('LoginScreen renders brand header, Server IP field, and switches modes',
+  testWidgets('LoginScreen renders brand header, minimal server dropdown, and switches modes',
       (WidgetTester tester) async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();
@@ -28,14 +28,24 @@ void main() {
     await tester.pump();
 
     expect(find.text('SignMind AI'), findsWidgets);
-    expect(find.text('ตั้งค่าเซิร์ฟเวอร์ (Server IP)'), findsOneWidget);
+    expect(find.text('เซิร์ฟเวอร์:'), findsOneWidget);
+    expect(find.byKey(const Key('serverModeDropdown')), findsOneWidget);
 
-    // In demo mode by default
+    // Main server is selected by default; verify loginEmailField is shown
+    expect(find.byKey(const Key('loginEmailField')), findsOneWidget);
+
+    // Switch to demo mode via dropdown to verify enterDemoModeButton
+    await tester.tap(find.byKey(const Key('serverModeDropdown')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('โหมดสาธิตออฟไลน์ (Demo Offline)').last);
+    await tester.pumpAndSettle();
     expect(find.byKey(const Key('enterDemoModeButton')), findsOneWidget);
 
-    // Switch off demo mode
-    await tester.tap(find.text('โหมดสาธิตออฟไลน์'));
-    await tester.pump();
+    // Switch to custom server via dropdown
+    await tester.tap(find.byKey(const Key('serverModeDropdown')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('กำหนดที่อยู่เซิร์ฟเวอร์เอง (Custom URL)').last);
+    await tester.pumpAndSettle();
 
     // Verify Server IP text form field is visible and editable
     final urlField = find.byKey(const Key('loginServerUrlField'));

@@ -19,9 +19,8 @@ void main() {
     expect(find.byKey(const Key('enterMainAppButtonTop')), findsOneWidget);
     expect(find.byKey(const Key('enterMainAppHeroButton')), findsOneWidget);
 
-    // Verify all 3 feature introduction cards exist
+    // Verify all 2 feature introduction cards exist
     expect(find.text('สแกนแปลภาษามือ'), findsOneWidget);
     expect(find.text('เรียนรู้ภาษามือ'), findsOneWidget);
-    expect(find.text('ตั้งค่าระบบและ AI Tuning'), findsOneWidget);
   });
 }

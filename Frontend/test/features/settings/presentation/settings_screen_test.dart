@@ -37,7 +37,7 @@ void main() {
 
     // Verify system version and connection status
     expect(find.text('SignMind AI v1.0.0'), findsOneWidget);
-    expect(find.text('ACTIVE'), findsOneWidget);
+    expect(find.text('DISCONNECTED'), findsOneWidget);
 
     // Verify default state in Riverpod provider
     expect(container.read(settingsProvider).themeMode, ThemeMode.system);
@@ -75,8 +75,12 @@ void main() {
     expect(container.read(settingsProvider).autoSpeak, isFalse);
   });
 
-  testWidgets('Server URL setting is editable when demo mode is off and persists', (tester) async {
-    final container = await makeContainer();
+  testWidgets('Server URL setting is editable when demo mode is off and persists',
+      (WidgetTester tester) async {
+    final prefs = await SharedPreferences.getInstance();
+    final container = ProviderContainer(
+      overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
+    );
     addTearDown(container.dispose);
 
     await tester.pumpWidget(
@@ -87,7 +91,7 @@ void main() {
     );
 
     expect(find.text('เซิร์ฟเวอร์ (Server Connection)'), findsOneWidget);
-    expect(container.read(settingsProvider).useSimulatedStream, isTrue);
+    expect(container.read(settingsProvider).useSimulatedStream, isFalse);
 
     // Verify that the connected server info and changeServerLoginButton are displayed.
     final changeServerButton = find.byKey(
@@ -95,6 +99,14 @@ void main() {
     );
     await tester.ensureVisible(changeServerButton);
     expect(changeServerButton, findsOneWidget);
+    expect(find.text('https://signmind.harumi.dev'), findsOneWidget);
+
+    // Toggle demo mode switch to on and verify it switches to simulated mode
+    final demoSwitch = find.text('โหมดจำลอง (Demo Mode)');
+    await tester.ensureVisible(demoSwitch);
+    await tester.tap(demoSwitch);
+    await tester.pumpAndSettle();
+    expect(container.read(settingsProvider).useSimulatedStream, isTrue);
     expect(find.text('โหมดสาธิตออฟไลน์ (Simulated Mode)'), findsOneWidget);
   });
 }

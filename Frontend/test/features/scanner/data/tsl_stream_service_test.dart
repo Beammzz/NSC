@@ -257,13 +257,13 @@ void main() {
       addTearDown(container.dispose);
 
       expect(container.read(tslStreamServiceProvider),
-          isA<SimulatedTslStreamService>());
+          isA<WebSocketTslStreamService>());
 
       container
           .read(settingsProvider.notifier)
-          .toggleSimulatedStream(false);
+          .toggleSimulatedStream(true);
       expect(container.read(tslStreamServiceProvider),
-          isA<WebSocketTslStreamService>());
+          isA<SimulatedTslStreamService>());
     });
   });
 }

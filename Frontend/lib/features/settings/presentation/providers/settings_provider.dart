@@ -16,6 +16,7 @@ class SettingsNotifier extends Notifier<AppSettings> {
   static const _keyHaptic = 'settings.hapticFeedback';
   static const _keyConfidence = 'settings.confidenceThreshold';
   static const _keyResolution = 'settings.cameraResolution';
+  static const _keyDebugOverlay = 'settings.showDebugOverlay';
   static const _keyServerUrl = 'settings.serverUrl';
   static const _keySimulatedStream = 'settings.useSimulatedStream';
   static const _keyRememberCredentials = 'settings.rememberCredentials';
@@ -52,6 +53,8 @@ class SettingsNotifier extends Notifier<AppSettings> {
           prefs.getDouble(_keyConfidence) ?? initial.confidenceThreshold,
       cameraResolution:
           prefs.getString(_keyResolution) ?? initial.cameraResolution,
+      showDebugOverlay:
+          prefs.getBool(_keyDebugOverlay) ?? initial.showDebugOverlay,
       serverUrl: prefs.getString(_keyServerUrl) ?? initial.serverUrl,
       useSimulatedStream:
           prefs.getBool(_keySimulatedStream) ?? initial.useSimulatedStream,
@@ -100,6 +103,11 @@ class SettingsNotifier extends Notifier<AppSettings> {
   void setCameraResolution(String value) {
     state = state.copyWith(cameraResolution: value);
     _prefs.setString(_keyResolution, value);
+  }
+
+  void toggleDebugOverlay(bool value) {
+    state = state.copyWith(showDebugOverlay: value);
+    _prefs.setBool(_keyDebugOverlay, value);
   }
 
   void setServerUrl(String value) {

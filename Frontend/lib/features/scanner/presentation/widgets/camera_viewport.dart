@@ -12,6 +12,7 @@ import 'package:signmind/core/widgets/main_scaffold.dart';
 import 'package:signmind/features/scanner/domain/models/scanner_models.dart';
 import 'package:signmind/features/scanner/presentation/providers/camera_provider.dart';
 import 'package:signmind/features/scanner/presentation/providers/scanner_provider.dart';
+import 'package:signmind/features/settings/presentation/providers/settings_provider.dart';
 
 /// Control channel for the native CameraX session (Stage B), e.g. switching
 /// the bound lens. Matches `MainActivity.CAMERA_CONTROL_CHANNEL`.
@@ -86,46 +87,49 @@ class _CameraViewportState extends ConsumerState<CameraViewport> {
                 ),
               ),
 
-              // FPS / latency chips (bottom left)
-              Positioned(
-                left: 12,
-                bottom: 12,
-                child: Row(
-                  children: [
-                    _buildChip(
-                      state.isScanning ? '${state.fps} FPS' : '— FPS',
-                    ),
-                    const SizedBox(width: 6),
-                    _buildChip(
-                      state.isScanning ? 'หน่วง ${state.latencySeconds} วิ' : '—',
-                    ),
-                  ],
+              // FPS / latency / confidence debug chips — only when enabled
+              if (ref.watch(settingsProvider.select((s) => s.showDebugOverlay))) ...[
+                // FPS / latency chips (bottom left)
+                Positioned(
+                  left: 12,
+                  bottom: 12,
+                  child: Row(
+                    children: [
+                      _buildChip(
+                        state.isScanning ? '${state.fps} FPS' : '— FPS',
+                      ),
+                      const SizedBox(width: 6),
+                      _buildChip(
+                        state.isScanning ? 'หน่วง ${state.latencySeconds} วิ' : '—',
+                      ),
+                    ],
+                  ),
                 ),
-              ),
 
-              // Confidence chip (bottom right)
-              Positioned(
-                right: 12,
-                bottom: 12,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: context.isDarkMode
-                        ? AppTheme.darkNavy.withAlpha(200)
-                        : Colors.white.withAlpha(220),
-                    border: Border.all(color: context.borderColor, width: 1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    isDetected ? 'ความเชื่อมั่น $confPercent%' : 'ความเชื่อมั่น —',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: isDetected ? okColor : context.textMutedColor,
+                // Confidence chip (bottom right)
+                Positioned(
+                  right: 12,
+                  bottom: 12,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: context.isDarkMode
+                          ? AppTheme.darkNavy.withAlpha(200)
+                          : Colors.white.withAlpha(220),
+                      border: Border.all(color: context.borderColor, width: 1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      isDetected ? 'ความเชื่อมั่น $confPercent%' : 'ความเชื่อมั่น —',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: isDetected ? okColor : context.textMutedColor,
+                      ),
                     ),
                   ),
                 ),
-              ),
+              ],
 
               // Flip-camera button (top right, left of pause) — shown when a
               // switchable camera exists: the native CameraX session on Android,
@@ -316,6 +320,12 @@ class _LandmarkOverlay extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final showSkeleton = ref.watch(
+      settingsProvider.select((s) => s.showHandSkeleton),
+    );
+    if (!showSkeleton) {
+      return const RepaintBoundary(child: SizedBox.shrink());
+    }
     final frame = ref.watch(currentFrameProvider);
     return RepaintBoundary(
       child: CustomPaint(

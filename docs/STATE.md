@@ -1,5 +1,36 @@
 # State
 
+## Goal (2026-07-19 evening): freeze Kotlin for Shorebird OTA
+User adopting Shorebird; patches cover Dart only, so Kotlin (+ bundled .task assets,
+gradle, manifest) is frozen at each store release. Made native scanner a configurable
+engine so future changes stay Dart-side:
+1. ScannerTuning object (CameraPreviewView.kt): @Volatile knobs — targetFps (12),
+   poseIntervalMs (150), handProbeIntervalMs (500), hand/pose delegates (GPU/CPU),
+   6 MediaPipe min-confidences (0.5), handModelPath/poseModelPath file overrides.
+   Defaults = shipped behavior exactly; no configure call = no change.
+2. MainActivity: `configure` method on `signmind/camera` channel -> ScannerTuning.update
+   + lastView.onTuningChanged() (closes landmarkers on their executors; next frame
+   rebuilds with new settings). Tuning process-wide, works before view creation.
+3. Model override: baseOptions() memory-maps a .task from an absolute file path
+   (Dart downloads it), falls back to bundled asset when missing/unreadable — makes
+   landmark models OTA-updatable despite Shorebird not patching assets.
+4. Fixes: landmarker init failure now backs off 3s (was: throw+log at frame rate);
+   CameraPreviewFactory.lastView cleared on view dispose (leak); pre-existing
+   compiler warning (unnecessary safe call, detectHands) removed.
+5. Self-heal: corrupt/rejected model override clears itself and retries the bundled
+   asset (buildHand/PoseLandmarkerOrNull) — a bad OTA model download cannot kill the
+   scanner.
+Verified: :app:compileDebugKotlin exit 0; flutter analyze clean; flutter test 51/51;
+release APK 50.5MB built + adb install Success; app launch clean (8s logcat: no FATAL/
+AndroidRuntime/SignMindCamera errors). Scanner-in-use on-device check pending user.
+No Dart caller for `configure` yet — added when first tuning need arises (that IS the
+OTA path). Contract documented in Frontend/AGENTS.md Work Guidance.
+NOTED (not done): flutter_tts still applies Kotlin Gradle Plugin — future Flutter
+versions will refuse to build (build warning); fixing = plugin upgrade = native/store
+release. gradle.properties android.builtInKotlin=false / android.newDsl=false
+deprecated, removed in AGP 10. Both are native-side items to batch into the NEXT
+store release, not OTA-patchable.
+
 ## Active goal (2026-07-13): Sign Example via Avatar
 Plan of record: docs/plans/sign-avatar-pipeline.md (4 phases — other agents read that first).
 Locked: Go-exec Python CLI for keypoint extraction; in-browser webcam recording in admin webui;
@@ -276,6 +307,9 @@ Completed app icon update and installation across both native mobile launcher an
 - Never delete files without pasting what will be lost and getting approval in-conversation.
 - 2026-07-19 user: "Delete lite model and also do Anything that will fix the low fps
   problem and also improve the app performance and Accuracy" (lite-model deletion approved).
+- 2026-07-19 user (Shorebird prep): "So I want you to look at the kotlin side and see if
+  it can optimize or fix anything. So that I dont need to touch the Kotlin side again"
+  — keep native layer frozen; future scanner changes go through Dart + `configure`.
 
 ## Open items
 - Medium/minor review findings deliberately NOT in scope: Flutter token refresh/persistence,

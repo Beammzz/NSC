@@ -23,10 +23,17 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    // Verify initial login page is shown
-    expect(find.byKey(const Key('enterDemoModeButton')), findsOneWidget);
+    // Verify initial login page is shown with serverModeDropdown
+    expect(find.byKey(const Key('serverModeDropdown')), findsOneWidget);
 
-    // Tap demo mode button to log in and proceed to /landing
+    // Select demo mode from the dropdown
+    await tester.tap(find.byKey(const Key('serverModeDropdown')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('โหมดสาธิตออฟไลน์ (Demo Offline)').last);
+    await tester.pumpAndSettle();
+
+    // Verify enterDemoModeButton is shown and tap to proceed to /landing
+    expect(find.byKey(const Key('enterDemoModeButton')), findsOneWidget);
     await tester.tap(find.byKey(const Key('enterDemoModeButton')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 200));

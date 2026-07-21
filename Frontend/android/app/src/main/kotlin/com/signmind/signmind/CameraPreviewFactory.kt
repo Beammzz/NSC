@@ -20,7 +20,12 @@ class CameraPreviewFactory(
         private set
 
     override fun create(context: Context, viewId: Int, args: Any?): PlatformView {
-        val view = CameraPreviewView(context, lifecycleOwner)
+        // The dispose callback clears the reference so a torn-down view (and
+        // its frame bitmaps) is not pinned until the next view is created.
+        lateinit var view: CameraPreviewView
+        view = CameraPreviewView(context, lifecycleOwner) {
+            if (lastView === view) lastView = null
+        }
         lastView = view
         return view
     }

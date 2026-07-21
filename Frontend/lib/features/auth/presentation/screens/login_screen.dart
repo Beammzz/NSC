@@ -5,6 +5,12 @@ import 'package:signmind/core/theme/app_theme.dart';
 import 'package:signmind/features/auth/presentation/providers/auth_provider.dart';
 import 'package:signmind/features/settings/presentation/providers/settings_provider.dart';
 
+enum ServerConfigOption {
+  defaultServer,
+  demoOffline,
+  customServer,
+}
+
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
 
@@ -20,6 +26,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   late final TabController _tabController;
   bool _isDemoMode = false;
   bool _rememberCredentials = true;
+  ServerConfigOption _selectedServerOption = ServerConfigOption.demoOffline;
 
   @override
   void initState() {
@@ -35,6 +42,53 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     );
     _tabController = TabController(length: 2, vsync: this);
     _isDemoMode = settings.useSimulatedStream;
+    if (settings.useSimulatedStream) {
+      _selectedServerOption = ServerConfigOption.demoOffline;
+    } else if (settings.serverUrl == 'https://signmind.harumi.dev' ||
+        settings.serverUrl.isEmpty) {
+      _selectedServerOption = ServerConfigOption.defaultServer;
+    } else {
+      _selectedServerOption = ServerConfigOption.customServer;
+    }
+  }
+
+  void _onServerOptionSelected(ServerConfigOption? option) {
+    if (option == null) return;
+    setState(() {
+      _selectedServerOption = option;
+      if (option == ServerConfigOption.demoOffline) {
+        _isDemoMode = true;
+      } else {
+        _isDemoMode = false;
+        if (option == ServerConfigOption.defaultServer) {
+          _urlController.text = 'https://signmind.harumi.dev';
+        }
+      }
+    });
+  }
+
+  String _getOptionShortLabel(ServerConfigOption option) {
+    return switch (option) {
+      ServerConfigOption.defaultServer => 'เซิร์ฟเวอร์หลัก',
+      ServerConfigOption.demoOffline => 'โหมดสาธิตออฟไลน์',
+      ServerConfigOption.customServer => 'กำหนดที่อยู่เซิร์ฟเวอร์เอง',
+    };
+  }
+
+  String _getOptionLongLabel(ServerConfigOption option) {
+    return switch (option) {
+      ServerConfigOption.defaultServer => 'เซิร์ฟเวอร์หลัก (Main Server)',
+      ServerConfigOption.demoOffline => 'โหมดสาธิตออฟไลน์ (Demo Offline)',
+      ServerConfigOption.customServer => 'กำหนดที่อยู่เซิร์ฟเวอร์เอง (Custom URL)',
+    };
+  }
+
+  IconData _getOptionIcon(ServerConfigOption option) {
+    return switch (option) {
+      ServerConfigOption.defaultServer => Icons.cloud_outlined,
+      ServerConfigOption.demoOffline => Icons.cloud_off_outlined,
+      ServerConfigOption.customServer => Icons.tune_outlined,
+    };
   }
 
   @override
@@ -170,75 +224,126 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                   ),
                   const SizedBox(height: 28),
 
-                  // Server IP Configuration Card (moved from Settings)
-                  Container(
-                    padding: const EdgeInsets.all(18),
-                    decoration: BoxDecoration(
-                      color: context.cardColor,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: context.borderColor,
-                      ),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                  // Minimal Server Configuration (Dropdown)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Expanded(
-                              child: Row(
-                                children: [
-                                  const Icon(
-                                    Icons.dns_outlined,
-                                    color: AppTheme.primaryAccent,
-                                    size: 18,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Flexible(
-                                    child: Text(
-                                      'ตั้งค่าเซิร์ฟเวอร์ (Server IP)',
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w600,
-                                        color: context.textColor,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            // Demo mode chip
-                            FilterChip(
-                              label: Text(
-                                'โหมดสาธิตออฟไลน์',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: _isDemoMode
-                                      ? Colors.white
-                                      : context.textColor,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              selected: _isDemoMode,
-                              selectedColor: AppTheme.primaryAccent,
-                              backgroundColor: context.scaffoldBackgroundColor,
-                              onSelected: (val) {
-                                setState(() {
-                                  _isDemoMode = val;
-                                });
-                              },
-                            ),
-                          ],
+                        Text(
+                          'เซิร์ฟเวอร์:',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: context.textMutedColor,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
-                        if (!_isDemoMode) ...[
-                          const SizedBox(height: 12),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppTheme.primaryAccent.withAlpha(25),
+                              borderRadius: BorderRadius.circular(24),
+                              border: Border.all(
+                                color: AppTheme.primaryAccent.withAlpha(100),
+                                width: 1.2,
+                              ),
+                            ),
+                            child: DropdownButtonHideUnderline(
+                              child: DropdownButton<ServerConfigOption>(
+                                key: const Key('serverModeDropdown'),
+                                value: _selectedServerOption,
+                                isExpanded: true,
+                                icon: const Icon(
+                                  Icons.keyboard_arrow_down_rounded,
+                                  color: AppTheme.primaryAccent,
+                                  size: 18,
+                                ),
+                                dropdownColor: context.cardColor,
+                                borderRadius: BorderRadius.circular(14),
+                                onChanged: _onServerOptionSelected,
+                                selectedItemBuilder: (BuildContext context) {
+                                  return ServerConfigOption.values.map<Widget>((
+                                    option,
+                                  ) {
+                                    return Align(
+                                      alignment: Alignment.centerLeft,
+                                      child: Text(
+                                        _getOptionShortLabel(option),
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                          color: AppTheme.primaryAccent,
+                                        ),
+                                      ),
+                                    );
+                                  }).toList();
+                                },
+                                items: ServerConfigOption.values.map((option) {
+                                  return DropdownMenuItem<ServerConfigOption>(
+                                    value: option,
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          _getOptionIcon(option),
+                                          size: 16,
+                                          color: _selectedServerOption == option
+                                              ? AppTheme.primaryAccent
+                                              : context.textMutedColor,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Flexible(
+                                          child: Text(
+                                            _getOptionLongLabel(option),
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              fontWeight:
+                                                  _selectedServerOption == option
+                                                      ? FontWeight.w600
+                                                      : FontWeight.normal,
+                                              color: _selectedServerOption == option
+                                                  ? AppTheme.primaryAccent
+                                                  : context.textColor,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }).toList(),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  if (_selectedServerOption ==
+                      ServerConfigOption.customServer) ...[
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: context.cardColor,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: context.borderColor),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
                           Text(
-                            'ที่อยู่เซิร์ฟเวอร์ SignMind Backend (WebSocket / HTTP):',
+                            'ที่อยู่เซิร์ฟเวอร์ (Custom Server URL):',
                             style: TextStyle(
                               fontSize: 12,
+                              fontWeight: FontWeight.w600,
                               color: context.textMutedColor,
                             ),
                           ),
@@ -284,10 +389,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                             ),
                           ),
                         ],
-                      ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 20),
+                  ],
 
                   if (_isDemoMode) ...[
                     // Offline Demo Card

@@ -12,7 +12,7 @@ void main() {
   });
 
   testWidgets('ScannerScreen renders header, viewport, and translation sheet', (WidgetTester tester) async {
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({'settings.useSimulatedStream': true});
     final prefs = await SharedPreferences.getInstance();
     await tester.pumpWidget(
       ProviderScope(

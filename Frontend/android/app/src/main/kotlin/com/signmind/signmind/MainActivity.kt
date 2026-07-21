@@ -34,6 +34,16 @@ class MainActivity : FlutterFragmentActivity() {
                         cameraFactory.lastView?.setLens(facing)
                         result.success(null)
                     }
+                    // Applies ScannerTuning knobs (cadence, delegates,
+                    // confidence thresholds, model-file overrides) from Dart —
+                    // the OTA-patchable side. Tuning is process-wide, so a
+                    // configure call made before the preview exists still
+                    // applies when the view is created.
+                    "configure" -> {
+                        (call.arguments as? Map<*, *>)?.let { ScannerTuning.update(it) }
+                        cameraFactory.lastView?.onTuningChanged()
+                        result.success(null)
+                    }
                     else -> result.notImplemented()
                 }
             }

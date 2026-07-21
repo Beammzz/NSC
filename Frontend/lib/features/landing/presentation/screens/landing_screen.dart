@@ -28,16 +28,6 @@ class LandingScreen extends StatelessWidget {
         icon: Icons.menu_book_outlined,
         route: '/learn',
       ),
-      _FeatureCardData(
-        title: 'ตั้งค่าระบบและ AI Tuning',
-        subtitle: 'Gateway Settings & Runtime Config',
-        description:
-            'ตั้งค่าการเชื่อมต่อเซิร์ฟเวอร์ ปรับความแม่นยำ AI (Confidence Threshold) และปรับแต่งโหมดการแสดงผล',
-        badge: 'Gateway & Config',
-        accentColor: const Color(0xFF38BDF8),
-        icon: Icons.settings_outlined,
-        route: '/settings',
-      ),
     ];
 
     return Scaffold(
@@ -222,26 +212,13 @@ class LandingScreen extends StatelessWidget {
                     const SizedBox(height: 24),
 
                     // Section Title
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'ฟีเจอร์ทั้งหมดในระบบ (Feature Registry)',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                            color: context.textColor,
-                          ),
-                        ),
-                        Text(
-                          'ซิงก์กับ DOX',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: context.textMutedColor,
-                          ),
-                        ),
-                      ],
+                    Text(
+                      'ฟีเจอร์ทั้งหมดในระบบ (Feature Registry)',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: context.textColor,
+                      ),
                     ),
                     const SizedBox(height: 12),
 

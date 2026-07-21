@@ -27,9 +27,104 @@ import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarkerResult
 import io.flutter.plugin.platform.PlatformView
+import java.io.File
+import java.io.FileInputStream
+import java.nio.channels.FileChannel
 import java.util.ArrayDeque
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+
+/**
+ * Runtime tuning for the native scanner pipeline, settable from Dart via the
+ * `signmind/camera` MethodChannel `configure` call (see MainActivity).
+ * Shorebird OTA patches Dart only, so these knobs — and the model-file
+ * overrides — exist so cadence/accuracy/model changes ship as Dart patches
+ * without another Kotlin (store) release. Defaults reproduce the shipped
+ * behavior exactly; a `configure` payload missing a key leaves that field
+ * unchanged. Fields are @Volatile: written on the platform thread, read on
+ * the analysis/pose executors.
+ */
+object ScannerTuning {
+    /**
+     * Extraction cap. Matches the ~12fps the model was trained on (the server
+     * windows 30 frames regardless of rate, so faster capture would shrink the
+     * window's time span).
+     */
+    @Volatile var targetFps: Int = 12
+
+    /**
+     * Pose refresh cadence. Training and tsl_live_inference.py run pose EVERY
+     * frame, so pose values that hold then jump are a distribution the model
+     * never saw; ~6x/s keeps the step size small (pose CPU run is 58-102ms and
+     * the in-flight guard serializes, so this stays comfortably off saturation).
+     */
+    @Volatile var poseIntervalMs: Long = 150L
+
+    /**
+     * How long the 1-hand fast tracker may run before the 2-hand instance
+     * probes for a second hand — also the worst-case pickup delay when a
+     * second hand enters the frame.
+     */
+    @Volatile var handProbeIntervalMs: Long = 500L
+
+    /** Hand delegate: GPU measured best on Adreno 619 (see ensureLandmarkers). */
+    @Volatile var handDelegate: Delegate = Delegate.GPU
+
+    /** Pose delegate: CPU on purpose so pose never contends with hand on the GPU. */
+    @Volatile var poseDelegate: Delegate = Delegate.CPU
+
+    // MediaPipe's 0.5 defaults, spelled out so Dart can tune accuracy OTA.
+    @Volatile var minHandDetectionConfidence: Float = 0.5f
+
+    @Volatile var minHandPresenceConfidence: Float = 0.5f
+
+    @Volatile var minHandTrackingConfidence: Float = 0.5f
+
+    @Volatile var minPoseDetectionConfidence: Float = 0.5f
+
+    @Volatile var minPosePresenceConfidence: Float = 0.5f
+
+    @Volatile var minPoseTrackingConfidence: Float = 0.5f
+
+    /**
+     * Absolute file paths of replacement .task models (Dart downloads them to
+     * app storage — Shorebird cannot patch bundled assets). null / blank / a
+     * missing file falls back to the bundled asset.
+     */
+    @Volatile var handModelPath: String? = null
+
+    @Volatile var poseModelPath: String? = null
+
+    val frameIntervalMs: Long get() = 1000L / targetFps
+
+    /** Applies a Dart `configure` payload: unknown keys ignored, values clamped. */
+    fun update(args: Map<*, *>) {
+        (args["targetFps"] as? Number)?.let { targetFps = it.toInt().coerceIn(1, 60) }
+        (args["poseIntervalMs"] as? Number)?.let { poseIntervalMs = it.toLong().coerceIn(0L, 10_000L) }
+        (args["handProbeIntervalMs"] as? Number)?.let { handProbeIntervalMs = it.toLong().coerceIn(0L, 10_000L) }
+        (args["handDelegate"] as? String)?.let { handDelegate = parseDelegate(it, handDelegate) }
+        (args["poseDelegate"] as? String)?.let { poseDelegate = parseDelegate(it, poseDelegate) }
+        (args["minHandDetectionConfidence"] as? Number)?.let { minHandDetectionConfidence = it.toFloat().coerceIn(0f, 1f) }
+        (args["minHandPresenceConfidence"] as? Number)?.let { minHandPresenceConfidence = it.toFloat().coerceIn(0f, 1f) }
+        (args["minHandTrackingConfidence"] as? Number)?.let { minHandTrackingConfidence = it.toFloat().coerceIn(0f, 1f) }
+        (args["minPoseDetectionConfidence"] as? Number)?.let { minPoseDetectionConfidence = it.toFloat().coerceIn(0f, 1f) }
+        (args["minPosePresenceConfidence"] as? Number)?.let { minPosePresenceConfidence = it.toFloat().coerceIn(0f, 1f) }
+        (args["minPoseTrackingConfidence"] as? Number)?.let { minPoseTrackingConfidence = it.toFloat().coerceIn(0f, 1f) }
+        // containsKey so an explicit null / "" clears an override back to the asset.
+        if (args.containsKey("handModelPath")) {
+            handModelPath = (args["handModelPath"] as? String)?.takeIf { it.isNotBlank() }
+        }
+        if (args.containsKey("poseModelPath")) {
+            poseModelPath = (args["poseModelPath"] as? String)?.takeIf { it.isNotBlank() }
+        }
+    }
+
+    private fun parseDelegate(name: String, fallback: Delegate): Delegate = when (name.lowercase()) {
+        "gpu" -> Delegate.GPU
+        "cpu" -> Delegate.CPU
+        else -> fallback
+    }
+}
 
 /**
  * Native CameraX preview + MediaPipe analysis behind the Flutter scanner overlay
@@ -43,6 +138,7 @@ import java.util.concurrent.Executors
 class CameraPreviewView(
     private val context: Context,
     private val lifecycleOwner: LifecycleOwner,
+    private val onDisposed: () -> Unit = {},
 ) : PlatformView {
 
     private val previewView = PreviewView(context)
@@ -51,24 +147,36 @@ class CameraPreviewView(
 
     // Landmark inference runs off the main thread on a single analysis thread;
     // the landmarkers are created lazily there (model load is ~hundreds of ms).
+    // The landmarker fields are @Volatile because onTuningChanged() closes and
+    // nulls them from their owning executors while other threads read them.
     private val analysisExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+
+    @Volatile
     private var handLandmarker: HandLandmarker? = null
+
+    @Volatile
     private var poseLandmarker: PoseLandmarker? = null
     private var lastTimestampMs = 0L
+
+    // Backoff so a permanently failing landmarker init (e.g. corrupt model
+    // override) retries every LANDMARKER_RETRY_MS instead of logging at frame
+    // rate. Analysis thread only.
+    private var landmarkerRetryAtMs = 0L
 
     // Second HandLandmarker with numHands=1: with numHands=2 and only one hand
     // visible, MediaPipe re-runs palm detection EVERY frame searching the empty
     // slot (~130-170ms/frame measured 2026-07-17 on Adreno 619) — the one-hand
     // fps ceiling. Tracking the lone hand on this instance skips that; the
-    // 2-hand instance still runs as a probe every HAND_PROBE_INTERVAL_MS so a
-    // second hand entering the frame is picked up within that window.
+    // 2-hand instance still runs as a probe every ScannerTuning.handProbeIntervalMs
+    // so a second hand entering the frame is picked up within that window.
+    @Volatile
     private var handLandmarkerSolo: HandLandmarker? = null
     private var soloTimestampMs = 0L // solo instance's own VIDEO-mode timestamp stream
     private var trackedHandCount = 0 // analysis thread only
     private var nextProbeDueMs = 0L // analysis thread only
 
     // Pose feeds only the slow-moving body normalization + torso overlay, so it
-    // runs OFF the hand critical path: at most every POSE_INTERVAL_MS, on its
+    // runs OFF the hand critical path: at most every ScannerTuning.poseIntervalMs, on its
     // own executor, on its own copy of the frame. Emission never waits for it —
     // each emitted frame carries the latest completed pose result. This also
     // refreshes pose ~6x/s instead of the old every-6th-frame stride, which at
@@ -85,11 +193,9 @@ class CameraPreviewView(
     private var nextPoseDueMs = 0L // analysis thread only
     private val frameTimestamps = ArrayDeque<Long>()
 
-    // Extraction is capped at TARGET_FPS to match the ~12fps the model was
-    // trained on (the server windows 30 frames regardless of rate, so faster
-    // capture would shrink the window's time span). Advancing by the interval
-    // (not from "now") keeps the average rate at TARGET_FPS despite the camera
-    // delivering frames on ~33ms boundaries.
+    // Extraction is capped at ScannerTuning.targetFps (see its doc for why
+    // ~12fps). Advancing by the interval (not from "now") keeps the average
+    // rate at the cap despite the camera delivering frames on ~33ms boundaries.
     private var nextDueMs = 0L
 
     // Analysis frames are all the same size, so the RGBA source bitmap is
@@ -158,6 +264,37 @@ class CameraPreviewView(
         startCamera()
     }
 
+    /**
+     * Applies a ScannerTuning change: tears the landmarkers down on their own
+     * executors so the next frame lazily rebuilds them with the new delegates,
+     * thresholds, and model overrides. Cadence fields (fps / pose / probe
+     * intervals) are read live per frame and need no rebuild. An in-flight
+     * pose detect can race the close and throw once; its catch handles that.
+     */
+    fun onTuningChanged() {
+        if (isDisposed) return
+        analysisExecutor.execute {
+            try {
+                handLandmarker?.close()
+            } catch (_: Exception) {}
+            handLandmarker = null
+            try {
+                handLandmarkerSolo?.close()
+            } catch (_: Exception) {}
+            handLandmarkerSolo = null
+            trackedHandCount = 0
+            nextProbeDueMs = 0L
+            landmarkerRetryAtMs = 0L
+        }
+        poseExecutor.execute {
+            try {
+                poseLandmarker?.close()
+            } catch (_: Exception) {}
+            poseLandmarker = null
+            lastPoseResult = null
+        }
+    }
+
     /** Runs on [analysisExecutor]: one frame -> hands + pose -> emit to Dart. */
     private fun analyze(image: ImageProxy) {
         if (isDisposed || analyzing) {
@@ -169,7 +306,7 @@ class CameraPreviewView(
             image.close()
             return
         }
-        nextDueMs = maxOf(nextDueMs + FRAME_INTERVAL_MS, arrivalMs)
+        nextDueMs = maxOf(nextDueMs + ScannerTuning.frameIntervalMs, arrivalMs)
         analyzing = true
         try {
             ensureLandmarkers()
@@ -212,8 +349,8 @@ class CameraPreviewView(
     /**
      * Runs on the analysis thread: routes the frame to the cheap 1-hand tracker
      * while exactly one hand is tracked, falling back to the 2-hand instance
-     * otherwise — and as a periodic probe (every HAND_PROBE_INTERVAL_MS) so a
-     * second hand entering the frame is picked up within that window. Each
+     * otherwise — and as a periodic probe (every ScannerTuning.handProbeIntervalMs)
+     * so a second hand entering the frame is picked up within that window. Each
      * instance keeps its own strictly-increasing VIDEO-mode timestamp stream.
      */
     private fun detectHands(mpImage: MPImage, nowMs: Long): HandLandmarkerResult? {
@@ -222,7 +359,7 @@ class CameraPreviewView(
         val result = if (useSolo) {
             val ts = if (nowMs > soloTimestampMs) nowMs else soloTimestampMs + 1
             soloTimestampMs = ts
-            solo?.detectForVideo(mpImage, ts)
+            solo.detectForVideo(mpImage, ts)
         } else {
             val ts = if (nowMs > lastTimestampMs) nowMs else lastTimestampMs + 1
             lastTimestampMs = ts
@@ -233,7 +370,7 @@ class CameraPreviewView(
             // A 2-hand run (initial detection or an expired-window probe) that
             // sees exactly one hand arms/re-arms the solo window; solo runs
             // ride out the window they were given.
-            if (!useSolo) nextProbeDueMs = nowMs + HAND_PROBE_INTERVAL_MS
+            if (!useSolo) nextProbeDueMs = nowMs + ScannerTuning.handProbeIntervalMs
         } else {
             nextProbeDueMs = 0L // 0 or 2 hands: the 2-hand instance takes every frame
         }
@@ -243,7 +380,7 @@ class CameraPreviewView(
 
     /**
      * Runs on the analysis thread: hands the pose executor its own copy of the
-     * upright frame at most once per POSE_INTERVAL_MS. The copy is required
+     * upright frame at most once per ScannerTuning.poseIntervalMs. The copy is required
      * because the analyzer overwrites the reusable analysis bitmap on the next
      * frame while the pose graph may still be reading; the copy itself is only
      * rewritten between pose runs (guarded by [poseInFlight]). Pose uses the
@@ -253,7 +390,7 @@ class CameraPreviewView(
     private fun maybeSubmitPose(source: Bitmap, nowMs: Long) {
         if (poseInFlight || nowMs < nextPoseDueMs) return
         val landmarker = poseLandmarker ?: return
-        nextPoseDueMs = nowMs + POSE_INTERVAL_MS
+        nextPoseDueMs = nowMs + ScannerTuning.poseIntervalMs
         val copy = poseBitmap
             ?.takeIf { it.width == source.width && it.height == source.height }
             ?: Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
@@ -282,9 +419,10 @@ class CameraPreviewView(
 
     private fun ensureLandmarkers() {
         if (isDisposed) return
-        // Both models default to CPU, which caps two-model throughput at ~6fps on
-        // this device; run them on the GPU delegate and fall back to CPU only if
-        // GPU init throws (unsupported driver / emulator).
+        if (handLandmarker != null && handLandmarkerSolo != null && poseLandmarker != null) return
+        val nowMs = SystemClock.elapsedRealtime()
+        if (nowMs < landmarkerRetryAtMs) return
+        // Delegate defaults (ScannerTuning): hand GPU, pose CPU.
         // Hand stays on the GPU. Re-measured 2026-07-12 on the release build
         // (Redmi Note 12 5G, two hands tracked): GPU 70-98ms vs CPU/XNNPACK
         // 51-115ms — same ~8.9fps either way, but CPU-hand made the GPU pose
@@ -292,20 +430,10 @@ class CameraPreviewView(
         // tracking is compute-bound on this class of device; <=1 hand hits the
         // 12fps cap.
         if (handLandmarker == null) {
-            handLandmarker = try {
-                buildHandLandmarker(Delegate.GPU, numHands = 2)
-            } catch (e: Exception) {
-                Log.w(TAG, "HandLandmarker GPU delegate unavailable, using CPU", e)
-                buildHandLandmarker(Delegate.CPU, numHands = 2)
-            }
+            handLandmarker = buildHandLandmarkerOrNull(numHands = 2)
         }
         if (handLandmarkerSolo == null) {
-            handLandmarkerSolo = try {
-                buildHandLandmarker(Delegate.GPU, numHands = 1)
-            } catch (e: Exception) {
-                Log.w(TAG, "solo HandLandmarker GPU delegate unavailable, using CPU", e)
-                buildHandLandmarker(Delegate.CPU, numHands = 1)
-            }
+            handLandmarkerSolo = buildHandLandmarkerOrNull(numHands = 1)
         }
         // Pose runs on CPU on purpose: it executes concurrently with hand (own
         // executor), and on the GPU the two contend — measured 2026-07-17 while
@@ -313,7 +441,79 @@ class CameraPreviewView(
         // GPU pose overlapped, capping the pipeline at ~6fps. CPU/XNNPACK pose
         // costs a few big-core bursts ~6x/s but leaves the GPU hand-exclusive.
         if (poseLandmarker == null) {
-            poseLandmarker = buildPoseLandmarker(Delegate.CPU)
+            poseLandmarker = buildPoseLandmarkerOrNull()
+        }
+        if (handLandmarker == null || handLandmarkerSolo == null || poseLandmarker == null) {
+            landmarkerRetryAtMs = nowMs + LANDMARKER_RETRY_MS
+        }
+    }
+
+    /**
+     * Builds a HandLandmarker on the ScannerTuning delegate, falling back to
+     * CPU when GPU init throws (unsupported driver / emulator). If init fails
+     * outright while a model override is set (e.g. a corrupt download), the
+     * override is cleared and the bundled asset tried once — a bad OTA model
+     * must never kill the scanner. Returns null when even that fails so
+     * ensureLandmarkers backs off instead of logging at frame rate.
+     */
+    private fun buildHandLandmarkerOrNull(numHands: Int): HandLandmarker? {
+        val built = buildHandLandmarkerAnyDelegate(numHands)
+        if (built == null && ScannerTuning.handModelPath != null) {
+            Log.w(TAG, "hand model override rejected — reverting to bundled $HAND_MODEL")
+            ScannerTuning.handModelPath = null
+            return buildHandLandmarkerAnyDelegate(numHands)
+        }
+        return built
+    }
+
+    private fun buildHandLandmarkerAnyDelegate(numHands: Int): HandLandmarker? {
+        val preferred = ScannerTuning.handDelegate
+        return try {
+            buildHandLandmarker(preferred, numHands)
+        } catch (e: Exception) {
+            if (preferred == Delegate.GPU) {
+                Log.w(TAG, "HandLandmarker($numHands) GPU delegate unavailable, using CPU", e)
+                try {
+                    buildHandLandmarker(Delegate.CPU, numHands)
+                } catch (e2: Exception) {
+                    Log.e(TAG, "HandLandmarker($numHands) init failed", e2)
+                    null
+                }
+            } else {
+                Log.e(TAG, "HandLandmarker($numHands) init failed", e)
+                null
+            }
+        }
+    }
+
+    /** Pose counterpart of [buildHandLandmarkerOrNull], same override self-heal. */
+    private fun buildPoseLandmarkerOrNull(): PoseLandmarker? {
+        val built = buildPoseLandmarkerAnyDelegate()
+        if (built == null && ScannerTuning.poseModelPath != null) {
+            Log.w(TAG, "pose model override rejected — reverting to bundled $POSE_MODEL")
+            ScannerTuning.poseModelPath = null
+            return buildPoseLandmarkerAnyDelegate()
+        }
+        return built
+    }
+
+    private fun buildPoseLandmarkerAnyDelegate(): PoseLandmarker? {
+        val preferred = ScannerTuning.poseDelegate
+        return try {
+            buildPoseLandmarker(preferred)
+        } catch (e: Exception) {
+            if (preferred == Delegate.GPU) {
+                Log.w(TAG, "PoseLandmarker GPU delegate unavailable, using CPU", e)
+                try {
+                    buildPoseLandmarker(Delegate.CPU)
+                } catch (e2: Exception) {
+                    Log.e(TAG, "PoseLandmarker init failed", e2)
+                    null
+                }
+            } else {
+                Log.e(TAG, "PoseLandmarker init failed", e)
+                null
+            }
         }
     }
 
@@ -321,14 +521,12 @@ class CameraPreviewView(
         HandLandmarker.createFromOptions(
             context,
             HandLandmarker.HandLandmarkerOptions.builder()
-                .setBaseOptions(
-                    BaseOptions.builder()
-                        .setModelAssetPath(HAND_MODEL)
-                        .setDelegate(delegate)
-                        .build(),
-                )
+                .setBaseOptions(baseOptions(delegate, ScannerTuning.handModelPath, HAND_MODEL))
                 .setRunningMode(RunningMode.VIDEO)
                 .setNumHands(numHands)
+                .setMinHandDetectionConfidence(ScannerTuning.minHandDetectionConfidence)
+                .setMinHandPresenceConfidence(ScannerTuning.minHandPresenceConfidence)
+                .setMinTrackingConfidence(ScannerTuning.minHandTrackingConfidence)
                 .build(),
         )
 
@@ -336,16 +534,44 @@ class CameraPreviewView(
         PoseLandmarker.createFromOptions(
             context,
             PoseLandmarker.PoseLandmarkerOptions.builder()
-                .setBaseOptions(
-                    BaseOptions.builder()
-                        .setModelAssetPath(POSE_MODEL)
-                        .setDelegate(delegate)
-                        .build(),
-                )
+                .setBaseOptions(baseOptions(delegate, ScannerTuning.poseModelPath, POSE_MODEL))
                 .setRunningMode(RunningMode.VIDEO)
                 .setNumPoses(1)
+                .setMinPoseDetectionConfidence(ScannerTuning.minPoseDetectionConfidence)
+                .setMinPosePresenceConfidence(ScannerTuning.minPosePresenceConfidence)
+                .setMinTrackingConfidence(ScannerTuning.minPoseTrackingConfidence)
                 .build(),
         )
+
+    /**
+     * Base options for a landmarker: memory-maps the model from
+     * [overridePath] when that file exists (Dart downloads replacement models
+     * there — Shorebird cannot patch bundled assets), else loads the bundled
+     * [assetName]. A missing or unreadable override never kills the pipeline;
+     * it logs and falls back to the asset.
+     */
+    private fun baseOptions(delegate: Delegate, overridePath: String?, assetName: String): BaseOptions {
+        val builder = BaseOptions.builder().setDelegate(delegate)
+        if (overridePath != null) {
+            try {
+                val file = File(overridePath)
+                if (file.isFile && file.length() > 0L) {
+                    FileInputStream(file).use { stream ->
+                        // The mapping stays valid after the stream closes; the
+                        // buffer itself holds it.
+                        builder.setModelAssetBuffer(
+                            stream.channel.map(FileChannel.MapMode.READ_ONLY, 0, file.length()),
+                        )
+                    }
+                    return builder.build()
+                }
+                Log.w(TAG, "model override not found: $overridePath — using bundled $assetName")
+            } catch (e: Exception) {
+                Log.w(TAG, "model override unreadable: $overridePath — using bundled $assetName", e)
+            }
+        }
+        return builder.setModelAssetPath(assetName).build()
+    }
 
     /**
      * Builds the EventChannel payload:
@@ -449,6 +675,7 @@ class CameraPreviewView(
         }
         analysisExecutor.shutdown()
         poseExecutor.shutdown()
+        onDisposed()
     }
 
     companion object {
@@ -461,17 +688,8 @@ class CameraPreviewView(
         // reference recognized the same signs. Full is affordable now that
         // pose runs ~6x/s on the CPU executor instead of inline per frame.
         private const val POSE_MODEL = "pose_landmarker_full.task"
-        // Pose refresh cadence. Training and tsl_live_inference.py run pose
-        // EVERY frame, so pose values that hold then jump are a distribution
-        // the model never saw; ~6x/s halves the step size vs the old 250ms
-        // (pose CPU run is 58-102ms and the in-flight guard serializes, so
-        // this stays comfortably off saturation).
-        private const val POSE_INTERVAL_MS = 150L
-        // How long the 1-hand fast tracker may run before the 2-hand instance
-        // probes for a second hand — also the worst-case pickup delay when a
-        // second hand enters the frame.
-        private const val HAND_PROBE_INTERVAL_MS = 500L
-        private const val TARGET_FPS = 12
-        private const val FRAME_INTERVAL_MS = 1000L / TARGET_FPS
+        // Cadence knobs (fps, pose interval, hand probe) live in ScannerTuning
+        // so Dart can retune them OTA.
+        private const val LANDMARKER_RETRY_MS = 3000L
     }
 }

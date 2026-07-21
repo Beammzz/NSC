@@ -8,6 +8,10 @@ class AppSettings {
   final double confidenceThreshold;
   final String cameraResolution;
 
+  /// When true, debug overlay (FPS, latency, confidence) is shown on the
+  /// scanner camera viewport.
+  final bool showDebugOverlay;
+
   /// Base URL of the SignMind backend, e.g. `https://signmind.harumi.dev`.
   /// The stream service appends `/api/v1/stream`.
   final String serverUrl;
@@ -32,6 +36,7 @@ class AppSettings {
     required this.hapticFeedback,
     required this.confidenceThreshold,
     required this.cameraResolution,
+    required this.showDebugOverlay,
     required this.serverUrl,
     required this.useSimulatedStream,
     required this.rememberCredentials,
@@ -49,9 +54,10 @@ class AppSettings {
       hapticFeedback: true,
       confidenceThreshold: 0.85,
       cameraResolution: '720p',
+      showDebugOverlay: false,
       // Production server default.
       serverUrl: 'https://signmind.harumi.dev',
-      useSimulatedStream: true,
+      useSimulatedStream: false,
       rememberCredentials: true,
       savedEmail: '',
       savedPassword: '',
@@ -66,6 +72,7 @@ class AppSettings {
     bool? hapticFeedback,
     double? confidenceThreshold,
     String? cameraResolution,
+    bool? showDebugOverlay,
     String? serverUrl,
     bool? useSimulatedStream,
     bool? rememberCredentials,
@@ -82,6 +89,7 @@ class AppSettings {
       hapticFeedback: hapticFeedback ?? this.hapticFeedback,
       confidenceThreshold: confidenceThreshold ?? this.confidenceThreshold,
       cameraResolution: cameraResolution ?? this.cameraResolution,
+      showDebugOverlay: showDebugOverlay ?? this.showDebugOverlay,
       serverUrl: serverUrl ?? this.serverUrl,
       useSimulatedStream: useSimulatedStream ?? this.useSimulatedStream,
       rememberCredentials: rememberCredentials ?? this.rememberCredentials,

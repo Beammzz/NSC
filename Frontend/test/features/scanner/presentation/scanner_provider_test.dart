@@ -16,7 +16,7 @@ Future<ProviderContainer> makeContainer() async {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  setUp(() => SharedPreferences.setMockInitialValues({}));
+  setUp(() => SharedPreferences.setMockInitialValues({'settings.useSimulatedStream': true}));
 
   group('ScannerNotifier TTS & Auto-Speak', () {
     test('speakSentence invokes ttsService.speak with full sentence', () async {

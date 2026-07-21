@@ -218,6 +218,26 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             },
                           ),
                         ),
+                        _buildDivider(),
+                        SwitchListTile(
+                          title: Text(
+                            'โหมดดีบัก (Debug Mode)',
+                            style: TextStyle(
+                              color: context.textColor,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          subtitle: Text(
+                            'แสดง FPS, เวลาหน่วง, และค่าความเชื่อมั่นบนกล้อง',
+                            style: TextStyle(
+                              color: context.textMutedColor.withAlpha(200),
+                              fontSize: 12,
+                            ),
+                          ),
+                          value: settings.showDebugOverlay,
+                          activeThumbColor: AppTheme.primaryAccent,
+                          onChanged: notifier.toggleDebugOverlay,
+                        ),
                       ],
                     ),
                     const SizedBox(height: 24),
