@@ -197,7 +197,9 @@ class MediaPipeLandmarkExtractionService implements LandmarkExtractionService {
     _sub = _events.listen(
       (event) {
         if (!_isActive) return;
-        if (!_controller.isClosed) _controller.add(parsePrimaryHand(event));
+        if (!_controller.isClosed && _controller.hasListener) {
+          _controller.add(parsePrimaryHand(event));
+        }
         if (!_frameController.isClosed) _frameController.add(parseFullFrame(event));
       },
       // Native/platform errors just pause overlay updates; the pipeline is

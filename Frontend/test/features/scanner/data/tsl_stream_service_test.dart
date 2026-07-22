@@ -81,6 +81,28 @@ void main() {
       }
     });
 
+    test('evaluates client-based confidence threshold', () {
+      final msg = jsonEncode({
+        'schema_version': 1,
+        'type': 'prediction',
+        'seq': 30,
+        'word': 'สวัสดี',
+        'confidence': 0.82,
+        'is_idle': false,
+        'is_uncertain': false,
+      });
+
+      // Under a lower threshold (0.80), 0.82 is accepted.
+      final frameAccepted = parseServerMessage(msg, confidenceThreshold: 0.80)!;
+      expect(frameAccepted.word, 'สวัสดี');
+      expect(frameAccepted.isDetecting, isFalse);
+
+      // Under a higher threshold (0.85), 0.82 is filtered.
+      final frameFiltered = parseServerMessage(msg, confidenceThreshold: 0.85)!;
+      expect(frameFiltered.word, '…');
+      expect(frameFiltered.isDetecting, isTrue);
+    });
+
     test('non-prediction and malformed messages return null', () {
       expect(parseServerMessage('{"schema_version":1,"type":"ready"}'), isNull);
       expect(parseServerMessage('not json'), isNull);

@@ -1,6 +1,7 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:signmind/features/settings/presentation/providers/settings_provider.dart';
 
 /// PlatformView type id of the native CameraX preview (Stage B, Android only).
 /// Must match `MainActivity.CAMERA_PREVIEW_VIEW_TYPE` in the Android host.
@@ -44,6 +45,15 @@ final cameraControllerProvider = FutureProvider<CameraController?>((ref) async {
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) return null;
 
   final lens = ref.watch(selectedCameraLensProvider);
+  final resolutionStr = ref.watch(
+    settingsProvider.select((s) => s.cameraResolution),
+  );
+  final resolutionPreset = switch (resolutionStr) {
+    '480p' => ResolutionPreset.medium,
+    '1080p' => ResolutionPreset.veryHigh,
+    _ => ResolutionPreset.high,
+  };
+
   final List<CameraDescription> cameras;
   try {
     cameras = await availableCameras();
@@ -59,7 +69,7 @@ final cameraControllerProvider = FutureProvider<CameraController?>((ref) async {
 
   final controller = CameraController(
     description,
-    ResolutionPreset.medium,
+    resolutionPreset,
     enableAudio: false,
   );
 

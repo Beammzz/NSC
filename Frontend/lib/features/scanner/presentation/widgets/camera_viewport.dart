@@ -371,22 +371,27 @@ class _LandmarkOverlayPainter extends CustomPainter {
     [2, 4], [4, 6], // right arm
   ];
 
+  static final Paint _linePaint = Paint()
+    ..strokeWidth = 2.4
+    ..strokeCap = StrokeCap.round
+    ..style = PaintingStyle.stroke;
+
+  static final Paint _circleFill = Paint()..color = Colors.white;
+
+  static final Paint _circleStroke = Paint()
+    ..strokeWidth = 2.2
+    ..style = PaintingStyle.stroke;
+
   @override
   void paint(Canvas canvas, Size size) {
     final f = frame;
     if (f == null) return;
 
-    final linePaint = Paint()
-      ..color = (isDetected ? accentColor : const Color(0xFF6EA8EE)).withAlpha(216)
-      ..strokeWidth = 2.4
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
+    final linePaint = _linePaint
+      ..color = (isDetected ? accentColor : const Color(0xFF6EA8EE)).withAlpha(216);
 
-    final circleFill = Paint()..color = Colors.white;
-    final circleStroke = Paint()
-      ..color = isDetected ? accentColor : AppTheme.primaryAccent
-      ..strokeWidth = 2.2
-      ..style = PaintingStyle.stroke;
+    final circleStroke = _circleStroke
+      ..color = isDetected ? accentColor : AppTheme.primaryAccent;
 
     // Landmarks are normalized 0..1 in the analysis image. PreviewView
     // cover-fits (FILL_CENTER) that image into the viewport — it scales to
@@ -427,7 +432,7 @@ class _LandmarkOverlayPainter extends CustomPainter {
       }
       for (final pt in pts) {
         final center = toOffset(pt);
-        canvas.drawCircle(center, nodeRadius, circleFill);
+        canvas.drawCircle(center, nodeRadius, _circleFill);
         canvas.drawCircle(center, nodeRadius, circleStroke);
       }
     }
@@ -436,11 +441,13 @@ class _LandmarkOverlayPainter extends CustomPainter {
     final pose = f.upperPose;
     if (pose.length == 7) {
       // Neck line: nose down to the midpoint of the two shoulders.
-      final mid = LandmarkPoint(
-        (pose[1].x + pose[2].x) / 2,
-        (pose[1].y + pose[2].y) / 2,
+      final midX = (pose[1].x + pose[2].x) / 2;
+      final midY = (pose[1].y + pose[2].y) / 2;
+      final midOffset = Offset(
+        (mirror ? 1.0 - midX : midX) * displayW + offsetX,
+        midY * displayH + offsetY,
       );
-      canvas.drawLine(toOffset(pose[0]), toOffset(mid), linePaint);
+      canvas.drawLine(toOffset(pose[0]), midOffset, linePaint);
       drawSkeleton(pose, _poseConnections, nodeRadius: 4.0);
     }
 

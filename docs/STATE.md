@@ -1,11 +1,55 @@
 # State
 
+## Goal (2026-07-21): scanner performance optimization round
+User: requested investigation and fix for scanner performance issues.
+Optimizations implemented across Flutter and Native layers:
+1. `_ScannerHeader` extracted into `const` widget in `scanner_screen.dart` to isolate top header from full-screen rebuilds.
+2. `MediaPipeLandmarkExtractionService` checks `hasListener` before calling `parsePrimaryHand(event)` to eliminate unused parsing and list allocations.
+3. `FeatureVectorFrame.fullVector` pre-computes 441-element list on construction; `buildFeatureVector` reuses static zeroed padding lists (`_zeroes147`).
+4. `WebSocketTslStreamService` prunes `_recentSends` using head-pruning `while` loop instead of O(N) `removeWhere` linear scans per frame.
+5. `CameraPreviewView.kt` reuses member `rotatedCanvas`, `poseCanvas`, and `rotationMatrix` to eliminate per-frame Bitmap/Matrix/Canvas instantiations.
+6. `LandmarkStreamHandler.kt` added `isPending` backpressure guard to drop landmark frame emissions if main UI thread is busy.
+7. `_LandmarkOverlayPainter` in `camera_viewport.dart` reuses static `Paint` objects (`_linePaint`, `_circleFill`, `_circleStroke`) and inlined neck midpoint calculation.
+Verified: `flutter analyze` clean; `flutter test` 51/51 tests pass. Uncommitted.
+
+## Goal (2026-07-21): two-hand dropout — solo tracker blinds the second hand
+User: fast-movement TSL gestures drop a hand and take "a while" to regain it; suspected the
+one-hand fps optimization. Correct.
+MEASURED (36s two-hand signing, Redmi Note 12 5G, release build, 375 frames = 10.4fps):
+hands=2 n=277 p50=86ms; hands=1 n=94 p50=53ms; pose 181 runs p50=107ms. hands=1 dropout
+durations: 59/58/165ms (real transitions) then 571, 582, 1073, 1132, 1168, 1185, 1759ms —
+quantized to 1x/2x/3x handProbeIntervalMs=500.
+CAUSE: CameraPreviewView.kt detectHands armed the solo window on ANY 2-hand-instance run
+returning count==1, including a momentary blur dropout from 2. The solo instance is
+numHands=1 and CANNOT represent a second hand, so the returning hand stayed invisible for a
+full window; a probe frame landing mid-blur re-armed it (hence the 2x/3x buckets).
+FIX: new ScannerTuning.soloArmCooldownMs (default 1000ms, OTA-tunable, 0 = old behavior) +
+lastTwoHandMs; solo is not armed while two hands were tracked within the cooldown. Costs one
+extra 2-hand frame (~+33ms, once) per genuine 2->1 transition; one-hand fps path unchanged.
+NOT REPRODUCED: the user's "6 fps". Native ran 10.4fps (mode 10-11, floor 8). The UI chip is
+`fps: _recentSends.length` (tsl_stream_service.dart:259) = WebSocket sends in the trailing
+second, refreshed only on server reply — measures round-trip cadence, not extraction rate.
+Likely source of the 6; UNVERIFIED.
+THERMAL (separate ceiling, not code-fixable): all 8 cores pinned at 61% of hardware max
+(A55 1113/1804MHz, A78 1228/2016MHz), GPU 700/950MHz, for the entire 36s — while Android
+reports `Thermal Status: 0` and battery saver is off. Vendor daemon capping below the API.
+Skin 45.6 -> 46.8C across the session. Steady-state, not progressive.
+NOTED (not done): pose = 107ms p50 x 5Hz = ~50% duty on a thermally-clamped big core, feeding
+only shoulder-width normalization + torso overlay. poseIntervalMs 150->250 would cut heat and
+free CPU, but STATE.md 2026-07-19 raised it 250->150 for accuracy — user's call, OTA-tunable.
+NOTED (not done): pose-driven probe (wrists 15/16 + visibility) would remove the blind
+handProbeIntervalMs timer entirely. Kotlin, larger change.
+Kotlin freeze deliberately broken this turn — user: "You can do what ever you want but after
+confirming the issue is fixed. please do shorebird release android again." Kotlin change
+cannot ship as a Shorebird patch, so `shorebird release android` is the correct command.
+
 ## Goal (2026-07-19 evening): freeze Kotlin for Shorebird OTA
 User adopting Shorebird; patches cover Dart only, so Kotlin (+ bundled .task assets,
 gradle, manifest) is frozen at each store release. Made native scanner a configurable
 engine so future changes stay Dart-side:
 1. ScannerTuning object (CameraPreviewView.kt): @Volatile knobs — targetFps (12),
-   poseIntervalMs (150), handProbeIntervalMs (500), hand/pose delegates (GPU/CPU),
+   poseIntervalMs (150), handProbeIntervalMs (500), soloArmCooldownMs (1000, added
+   2026-07-21), hand/pose delegates (GPU/CPU),
    6 MediaPipe min-confidences (0.5), handModelPath/poseModelPath file overrides.
    Defaults = shipped behavior exactly; no configure call = no change.
 2. MainActivity: `configure` method on `signmind/camera` channel -> ScannerTuning.update
@@ -202,6 +246,61 @@ RESULT 2026-07-19 16:5x (user in frame, real server signmind.harumi.dev):
   aligned (screenshot scanner3.png). Pose 78 runs/18s = 4.3Hz under load (110-145ms).
 - 0 error/exception tokens across all captures.
 GOAL ACHIEVED; everything uncommitted; shorebird not run (both need user's word).
+
+## Failed attempts (2026-07-21 two-hand dropout)
+- ATTEMPT 1 [L1]: ScannerTuning.soloArmCooldownMs=1000 + lastTwoHandMs — do not arm the
+  numHands=1 tracker while two hands were tracked within the cooldown.
+  GOOD: two-hand coverage 73.7% -> 89.9% of frames; two-hand frames delivered 7.66/s -> 8.39/s;
+  dropouts >=1000ms fell from 50% to 6% of all dropouts; hands=2 inter-frame gap p50 unchanged
+  at 100ms. flutter analyze clean, flutter test 51/51, compileDebugKotlin ok, 0 errors in 889
+  frames, recognition verified on-device (ดื่ม 89%, overlay aligned).
+  BAD (user caught it, I under-weighted the tail): hands=2 latency p90 100->130ms, p99 131->243,
+  max 145->267; 11.7% of frames fell to <=7fps spread across the whole session (baseline floor
+  was 8fps, never lower); 17 of 82 dropouts still >=500ms so the symptom is NOT gone.
+  DIAGNOSIS of the tail: 68% of >150ms hands=2 frames are the frame where the second hand
+  REAPPEARS (vs 8% enrichment on fast frames); pre-fix had zero frames >150ms. The spikes are
+  palm re-detection — real work the old code skipped by staying blind. Not a regression in the
+  pipeline, a cost that was previously hidden by the bug.
+  CONCLUSION: fixing the routing was necessary but treats a symptom. Root cause is the LOSS
+  RATE: ~0.8 second-hand losses/sec, each costing a 150-267ms re-acquisition.
+- NEXT HYPOTHESIS [L2]: minHandPresenceConfidence / minHandTrackingConfidence sit at MediaPipe's
+  0.5 default. Fast TSL motion at ~10fps indoors blurs a hand below 0.5 presence -> tracker
+  releases it -> full palm re-detection. Lowering both to ~0.3 (keeping minHandDetection at 0.5
+  so no phantom hands spawn) should cut the loss rate, which removes BOTH the dropouts and the
+  expensive re-acquisitions. UNTESTED — needs a build + a user signing capture.
+- ATTEMPT 2 [L2, hypothesis: loss rate is root; 0.5 presence/tracking releases blurred hands]:
+  minHandPresenceConfidence + minHandTrackingConfidence 0.5 -> 0.3 (detection stays 0.5).
+  RESULT: hypothesis NOT confirmed. fps floor still broken — min=5, 10.1% of frames <=7fps
+  (sign4 was 11.7%, pre-fix baseline 0%). Dropouts >=1000ms did fall to 1 (from 5). hands=2
+  latency p50 88->95, p90 130->146: no better.
+- METHODOLOGY PROBLEM (the real blocker): every capture has different scene content — hands=0
+  share was 1.1% (sign2) / 8.8% (sign4) / 24.7% (sign5). fps and coverage depend heavily on what
+  is in frame, so cross-run diffs CANNOT be attributed to code. Only claim that survives: the
+  pre-fix build showed min fps 8 / zero frames <=7fps, and BOTH post-fix builds show a low tail
+  (min 4, min 5) across independent captures — so the routing fix does cost fps.
+- UNPULLED LEVER: pose is 4.8-5.0 runs/s at p50 107-112ms = ~52% duty of ONE core, stable across
+  all three runs (good control variable), on a chip thermally clamped to 61%. poseIntervalMs
+  150->250 returns to the cadence that shipped 2026-07-19 and frees real budget WITHOUT trading
+  hand visibility. Untested. Largest remaining lever.
+- ATTEMPT 3 [L2, user-chosen]: revert ATTEMPT 2 (confidences back to 0.5), keep the routing
+  fix, cut poseIntervalMs 150 -> 250. Pose measured 4.8/s -> 3.4/s, duty ~52% -> ~39% of a core.
+  RESULT (sign6, 388 frames/40s; compare sign5 — nearest scene, 22.9% vs 24.7% hands=0):
+  frames <=7fps 10.1% -> 3.9%; hands=2 spikes >150ms 10 -> 4; sustained fps 9.6 -> 9.8; p90 gap
+  137 -> 119ms; total dropouts 40 -> 27, of which >=1000ms = 2 (7%). vs sign4 (pose 150): <=7fps
+  11.7% -> 3.9%, spikes 19 -> 4. 0 errors. Recognition verified on-device (sentence
+  "ดื่ม ชา กาแฟ เช้า ชา ถูก"; hand visibly motion-blurred with skeleton still latched).
+- MEASUREMENT NOTE: raw fps is scene-dependent and NOT comparable across runs. Use the
+  scene-controlled metric instead: inter-frame gap inside runs of >=10 consecutive hands=2
+  frames. On that metric sustained two-hand fps is ~10.0 for pre-fix AND the routing fix —
+  the routing fix costs nothing while two hands are tracked. Its cost is confined to TRANSITION
+  frames (palm re-detection when the 2nd hand reappears), which is real work the old code
+  skipped by staying blind.
+- NET vs shipped build: second hand invisible >=1s on 50% of dropouts -> 7%; low-fps tail 3.9%
+  of frames (was 0%, but the pre-fix capture had 1.1% hands=0 and only 10 dropouts — far fewer
+  transitions, so not a like-for-like scene).
+- NOT RELEASED YET. User halted the first release attempt on seeing the 4fps floor; correct
+  call. Awaiting user decision on releasing + version bump (1.0.0+1 android already active on
+  Shorebird, so a bump is required).
 
 ## Failed attempts (2026-07-17 signing-fps bug)
 - ATTEMPT 1 [L1]: pose moved off hand critical path (own executor, 250ms cadence, GPU) +

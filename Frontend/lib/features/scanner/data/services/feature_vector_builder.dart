@@ -11,13 +11,34 @@ import 'package:signmind/features/scanner/domain/models/scanner_models.dart';
 /// stays zero, but hands are still normalized against the defaults
 /// `mid = [0.5, 0.5, 0]`, `width = 1.0`. A missing hand/pose is all zeros.
 List<double> buildPositionVector(RawLandmarkFrame frame) {
-  final hasPose = frame.upperPose.length == 7;
+  double scaleX = 1.0;
+  if (frame.imageWidth != null &&
+      frame.imageHeight != null &&
+      frame.imageHeight! > 0) {
+    final aspect = frame.imageWidth! / frame.imageHeight!;
+    scaleX = aspect / (16.0 / 9.0);
+  }
+
+  LandmarkPoint adjust(LandmarkPoint p) {
+    if (scaleX == 1.0) return p;
+    return LandmarkPoint(
+      (p.x - 0.5) * scaleX + 0.5,
+      p.y,
+      p.z,
+    );
+  }
+
+  final pose = frame.upperPose.map(adjust).toList();
+  final leftHand = frame.leftHand.map(adjust).toList();
+  final rightHand = frame.rightHand.map(adjust).toList();
+
+  final hasPose = pose.length == 7;
 
   double midX = 0.5, midY = 0.5, midZ = 0.0;
   double width = 1.0;
   if (hasPose) {
-    final lShoulder = frame.upperPose[1]; // MediaPipe index 11
-    final rShoulder = frame.upperPose[2]; // MediaPipe index 12
+    final lShoulder = pose[1]; // MediaPipe index 11
+    final rShoulder = pose[2]; // MediaPipe index 12
     midX = (lShoulder.x + rShoulder.x) / 2.0;
     midY = (lShoulder.y + rShoulder.y) / 2.0;
     midZ = (lShoulder.z + rShoulder.z) / 2.0;
@@ -32,7 +53,7 @@ List<double> buildPositionVector(RawLandmarkFrame frame) {
 
   // Pose block (21). Zeros when no pose was detected.
   if (hasPose) {
-    for (final p in frame.upperPose) {
+    for (final p in pose) {
       out
         ..add((p.x - midX) / width)
         ..add((p.y - midY) / width)
@@ -42,8 +63,8 @@ List<double> buildPositionVector(RawLandmarkFrame frame) {
     out.addAll(List<double>.filled(21, 0.0));
   }
 
-  _appendHand(out, frame.leftHand, midX, midY, midZ, width);
-  _appendHand(out, frame.rightHand, midX, midY, midZ, width);
+  _appendHand(out, leftHand, midX, midY, midZ, width);
+  _appendHand(out, rightHand, midX, midY, midZ, width);
 
   return out;
 }
@@ -68,13 +89,19 @@ void _appendHand(
   }
 }
 
+final _zeroes147 = List<double>.filled(147, 0.0, growable: false);
+
 /// Wraps the 147 position vector into a [FeatureVectorFrame]. Velocity and
 /// acceleration are zero-filled: the server recomputes them from its own frame
 /// history and reads only the first 147 features (docs/api/stream-schema.md).
 FeatureVectorFrame buildFeatureVector(RawLandmarkFrame frame) {
+  final pos = buildPositionVector(frame);
+  final full = List<double>.filled(441, 0.0);
+  full.setRange(0, 147, pos);
   return FeatureVectorFrame(
-    positionFeatures: buildPositionVector(frame),
-    velocityFeatures: List<double>.filled(147, 0.0),
-    accelerationFeatures: List<double>.filled(147, 0.0),
+    positionFeatures: pos,
+    velocityFeatures: _zeroes147,
+    accelerationFeatures: _zeroes147,
+    fullVector: full,
   );
 }

@@ -55,10 +55,16 @@ object ScannerTuning {
     /**
      * Pose refresh cadence. Training and tsl_live_inference.py run pose EVERY
      * frame, so pose values that hold then jump are a distribution the model
-     * never saw; ~6x/s keeps the step size small (pose CPU run is 58-102ms and
-     * the in-flight guard serializes, so this stays comfortably off saturation).
+     * never saw — smaller steps favor accuracy. But the 150ms setting assumed a
+     * 58-102ms CPU pose run; measured 2026-07-21 it is p50 107-112ms across
+     * three independent captures, so 150ms kept the pose executor ~72% busy and
+     * burned ~52% duty of one core — while the vendor thermal daemon holds every
+     * core at 61% of its rated clock. Back to 250ms (the cadence that shipped
+     * 2026-07-19) to return that budget to the hand graph, which is on the
+     * critical path; pose only feeds shoulder-width normalization and the torso
+     * overlay, both slow-moving.
      */
-    @Volatile var poseIntervalMs: Long = 150L
+    @Volatile var poseIntervalMs: Long = 250L
 
     /**
      * How long the 1-hand fast tracker may run before the 2-hand instance
@@ -67,6 +73,19 @@ object ScannerTuning {
      */
     @Volatile var handProbeIntervalMs: Long = 500L
 
+    /**
+     * How long after the last frame that actually tracked two hands the 1-hand
+     * fast tracker stays disabled. A two-hand sign blinks down to one hand for
+     * a frame or two whenever motion blurs a hand mid-gesture; the solo
+     * instance has numHands=1 and *cannot* report the second hand, so engaging
+     * it on such a blink hid the returning hand for a whole
+     * handProbeIntervalMs — and a probe frame that landed mid-blur re-armed the
+     * window again. Measured 2026-07-21 during two-hand signing: dropouts of
+     * 571/582ms, 1073-1185ms and 1759ms, i.e. exactly 1x, 2x and 3x the window.
+     * 0 disables the guard (pre-2026-07-21 behavior).
+     */
+    @Volatile var soloArmCooldownMs: Long = 1000L
+
     /** Hand delegate: GPU measured best on Adreno 619 (see ensureLandmarkers). */
     @Volatile var handDelegate: Delegate = Delegate.GPU
 
@@ -74,6 +93,10 @@ object ScannerTuning {
     @Volatile var poseDelegate: Delegate = Delegate.CPU
 
     // MediaPipe's 0.5 defaults, spelled out so Dart can tune accuracy OTA.
+    // Tried and reverted 2026-07-21: presence+tracking at 0.3 (to hold a hand
+    // through motion blur instead of paying palm re-detection) did NOT restore
+    // the fps floor — 10.1% of frames still <=7fps vs 11.7% at 0.5. Don't retry
+    // without new evidence; see docs/STATE.md "Failed attempts (2026-07-21)".
     @Volatile var minHandDetectionConfidence: Float = 0.5f
 
     @Volatile var minHandPresenceConfidence: Float = 0.5f
@@ -95,6 +118,8 @@ object ScannerTuning {
 
     @Volatile var poseModelPath: String? = null
 
+    @Volatile var cameraResolution: String = "720p"
+
     val frameIntervalMs: Long get() = 1000L / targetFps
 
     /** Applies a Dart `configure` payload: unknown keys ignored, values clamped. */
@@ -102,8 +127,10 @@ object ScannerTuning {
         (args["targetFps"] as? Number)?.let { targetFps = it.toInt().coerceIn(1, 60) }
         (args["poseIntervalMs"] as? Number)?.let { poseIntervalMs = it.toLong().coerceIn(0L, 10_000L) }
         (args["handProbeIntervalMs"] as? Number)?.let { handProbeIntervalMs = it.toLong().coerceIn(0L, 10_000L) }
+        (args["soloArmCooldownMs"] as? Number)?.let { soloArmCooldownMs = it.toLong().coerceIn(0L, 10_000L) }
         (args["handDelegate"] as? String)?.let { handDelegate = parseDelegate(it, handDelegate) }
         (args["poseDelegate"] as? String)?.let { poseDelegate = parseDelegate(it, poseDelegate) }
+        (args["cameraResolution"] as? String)?.let { cameraResolution = it }
         (args["minHandDetectionConfidence"] as? Number)?.let { minHandDetectionConfidence = it.toFloat().coerceIn(0f, 1f) }
         (args["minHandPresenceConfidence"] as? Number)?.let { minHandPresenceConfidence = it.toFloat().coerceIn(0f, 1f) }
         (args["minHandTrackingConfidence"] as? Number)?.let { minHandTrackingConfidence = it.toFloat().coerceIn(0f, 1f) }
@@ -168,12 +195,15 @@ class CameraPreviewView(
     // slot (~130-170ms/frame measured 2026-07-17 on Adreno 619) — the one-hand
     // fps ceiling. Tracking the lone hand on this instance skips that; the
     // 2-hand instance still runs as a probe every ScannerTuning.handProbeIntervalMs
-    // so a second hand entering the frame is picked up within that window.
+    // so a second hand entering the frame is picked up within that window, and
+    // it keeps every frame for ScannerTuning.soloArmCooldownMs after two hands
+    // were last tracked (this instance can never report a second hand).
     @Volatile
     private var handLandmarkerSolo: HandLandmarker? = null
     private var soloTimestampMs = 0L // solo instance's own VIDEO-mode timestamp stream
     private var trackedHandCount = 0 // analysis thread only
     private var nextProbeDueMs = 0L // analysis thread only
+    private var lastTwoHandMs = 0L // analysis thread only; see ScannerTuning.soloArmCooldownMs
 
     // Pose feeds only the slow-moving body normalization + torso overlay, so it
     // runs OFF the hand critical path: at most every ScannerTuning.poseIntervalMs, on its
@@ -206,6 +236,9 @@ class CameraPreviewView(
     // Upright (rotated) frame, also allocated once: Bitmap.createBitmap with a
     // rotation matrix allocated a full frame per analyzed frame (GC churn).
     private var rotatedBitmap: Bitmap? = null
+    private var rotatedCanvas: Canvas? = null
+    private var poseCanvas: Canvas? = null
+    private val rotationMatrix = Matrix()
 
     // Drops frames that arrive while the previous one is still being analyzed so
     // the executor queue never backs up (STRATEGY_KEEP_ONLY_LATEST + this guard).
@@ -236,10 +269,19 @@ class CameraPreviewView(
             if (isDisposed) return@addListener
             val provider = future.get()
             cameraProvider = provider
-            val preview = Preview.Builder().build().also {
-                it.setSurfaceProvider(previewView.surfaceProvider)
+            val targetSize = when (ScannerTuning.cameraResolution) {
+                "480p" -> android.util.Size(854, 480)
+                "1080p" -> android.util.Size(1920, 1080)
+                else -> android.util.Size(1280, 720)
             }
+            val preview = Preview.Builder()
+                .setTargetResolution(targetSize)
+                .build()
+                .also {
+                    it.setSurfaceProvider(previewView.surfaceProvider)
+                }
             val analysis = ImageAnalysis.Builder()
+                .setTargetResolution(targetSize)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                 .build()
@@ -284,6 +326,7 @@ class CameraPreviewView(
             handLandmarkerSolo = null
             trackedHandCount = 0
             nextProbeDueMs = 0L
+            lastTwoHandMs = 0L
             landmarkerRetryAtMs = 0L
         }
         poseExecutor.execute {
@@ -292,6 +335,9 @@ class CameraPreviewView(
             } catch (_: Exception) {}
             poseLandmarker = null
             lastPoseResult = null
+        }
+        ContextCompat.getMainExecutor(context).execute {
+            startCamera()
         }
     }
 
@@ -350,8 +396,11 @@ class CameraPreviewView(
      * Runs on the analysis thread: routes the frame to the cheap 1-hand tracker
      * while exactly one hand is tracked, falling back to the 2-hand instance
      * otherwise — and as a periodic probe (every ScannerTuning.handProbeIntervalMs)
-     * so a second hand entering the frame is picked up within that window. Each
-     * instance keeps its own strictly-increasing VIDEO-mode timestamp stream.
+     * so a second hand entering the frame is picked up within that window. The
+     * solo tracker is held off for ScannerTuning.soloArmCooldownMs after any
+     * frame that tracked two hands, so a blur-dropped hand mid two-hand sign
+     * comes back on the next frame instead of a window later. Each instance
+     * keeps its own strictly-increasing VIDEO-mode timestamp stream.
      */
     private fun detectHands(mpImage: MPImage, nowMs: Long): HandLandmarkerResult? {
         val solo = handLandmarkerSolo
@@ -366,11 +415,19 @@ class CameraPreviewView(
             handLandmarker?.detectForVideo(mpImage, ts)
         }
         val count = result?.landmarks()?.size ?: 0
+        if (count == 2) lastTwoHandMs = nowMs
         if (count == 1) {
             // A 2-hand run (initial detection or an expired-window probe) that
             // sees exactly one hand arms/re-arms the solo window; solo runs
-            // ride out the window they were given.
-            if (!useSolo) nextProbeDueMs = nowMs + ScannerTuning.handProbeIntervalMs
+            // ride out the window they were given. NOT while two hands were
+            // tracked within soloArmCooldownMs though: there the count of 1 is
+            // a blur dropout mid two-hand sign, and the numHands=1 instance
+            // cannot report the hand coming back (see that knob's doc).
+            val recentlyTwoHanded = ScannerTuning.soloArmCooldownMs > 0L &&
+                nowMs - lastTwoHandMs < ScannerTuning.soloArmCooldownMs
+            if (!useSolo && !recentlyTwoHanded) {
+                nextProbeDueMs = nowMs + ScannerTuning.handProbeIntervalMs
+            }
         } else {
             nextProbeDueMs = 0L // 0 or 2 hands: the 2-hand instance takes every frame
         }
@@ -391,11 +448,16 @@ class CameraPreviewView(
         if (poseInFlight || nowMs < nextPoseDueMs) return
         val landmarker = poseLandmarker ?: return
         nextPoseDueMs = nowMs + ScannerTuning.poseIntervalMs
-        val copy = poseBitmap
-            ?.takeIf { it.width == source.width && it.height == source.height }
-            ?: Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
-                .also { poseBitmap = it }
-        Canvas(copy).drawBitmap(source, 0f, 0f, null)
+        val pCanvas = poseCanvas?.takeIf { poseBitmap != null && poseBitmap!!.width == source.width && poseBitmap!!.height == source.height }
+            ?: run {
+                val b = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
+                poseBitmap = b
+                val c = Canvas(b)
+                poseCanvas = c
+                c
+            }
+        pCanvas.drawBitmap(source, 0f, 0f, null)
+        val copy = poseBitmap!!
         poseInFlight = true
         poseExecutor.execute {
             try {
@@ -635,17 +697,20 @@ class CameraPreviewView(
         if (rotation == 0) return bitmap
         val outW = if (rotation % 180 == 0) width else height
         val outH = if (rotation % 180 == 0) height else width
-        val out = rotatedBitmap?.takeIf { it.width == outW && it.height == outH }
-            ?: Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
-                .also { rotatedBitmap = it }
-        // Rotate about the center, then shift into the output's frame. 90°
-        // multiples are pixel-exact, so no filtering paint is needed.
-        val matrix = Matrix().apply {
-            postTranslate(-width / 2f, -height / 2f)
-            postRotate(rotation.toFloat())
-            postTranslate(outW / 2f, outH / 2f)
-        }
-        Canvas(out).drawBitmap(bitmap, matrix, null)
+        val outCanvas = rotatedCanvas?.takeIf { rotatedBitmap != null && rotatedBitmap!!.width == outW && rotatedBitmap!!.height == outH }
+            ?: run {
+                val b = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
+                rotatedBitmap = b
+                val c = Canvas(b)
+                rotatedCanvas = c
+                c
+            }
+        val out = rotatedBitmap!!
+        rotationMatrix.reset()
+        rotationMatrix.postTranslate(-width / 2f, -height / 2f)
+        rotationMatrix.postRotate(rotation.toFloat())
+        rotationMatrix.postTranslate(outW / 2f, outH / 2f)
+        outCanvas.drawBitmap(bitmap, rotationMatrix, null)
         return out
     }
 

@@ -16,17 +16,29 @@ object LandmarkStreamHandler : EventChannel.StreamHandler {
     @Volatile
     private var sink: EventChannel.EventSink? = null
 
+    @Volatile
+    private var isPending = false
+
     override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
         sink = events
     }
 
     override fun onCancel(arguments: Any?) {
         sink = null
+        isPending = false
     }
 
-    /** Posts one landmark frame to Dart; a no-op when nothing is listening. */
+    /** Posts one landmark frame to Dart; drops emission if previous post is pending. */
     fun emit(frame: Map<String, Any?>) {
         val current = sink ?: return
-        mainHandler.post { current.success(frame) }
+        if (isPending) return
+        isPending = true
+        mainHandler.post {
+            try {
+                current.success(frame)
+            } finally {
+                isPending = false
+            }
+        }
     }
 }

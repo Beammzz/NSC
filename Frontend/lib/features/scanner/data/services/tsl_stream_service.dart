@@ -107,6 +107,7 @@ TranslationFrame? parseServerMessage(
   String data, {
   double latencySeconds = 0.0,
   int fps = 0,
+  double confidenceThreshold = 0.85,
 }) {
   final dynamic decoded;
   try {
@@ -120,7 +121,8 @@ TranslationFrame? parseServerMessage(
   final word = decoded['word'] as String? ?? '';
   final confidence = (decoded['confidence'] as num?)?.toDouble() ?? 0.0;
   final isIdle = decoded['is_idle'] == true;
-  final isUncertain = decoded['is_uncertain'] == true;
+  final isUncertain =
+      (decoded['is_uncertain'] == true) || (confidence < confidenceThreshold);
   final isDetecting = isIdle || isUncertain || word.isEmpty;
 
   return TranslationFrame(
@@ -138,6 +140,7 @@ class WebSocketTslStreamService implements TslStreamService {
   WebSocketTslStreamService({
     required this.baseUrl,
     this.accessToken,
+    this.confidenceThreshold = 0.85,
     WebSocketChannel Function(Uri uri)? connect,
   }) : _connect = connect ?? _bearerConnect(accessToken);
 
@@ -156,6 +159,7 @@ class WebSocketTslStreamService implements TslStreamService {
 
   final String baseUrl;
   final String? accessToken;
+  final double confidenceThreshold;
   final WebSocketChannel Function(Uri uri) _connect;
   final _controller = StreamController<TranslationFrame>.broadcast();
   final _statusController = StreamController<ConnectionStatus>.broadcast();
@@ -251,12 +255,15 @@ class WebSocketTslStreamService implements TslStreamService {
       }
     }
 
-    _recentSends.removeWhere(
-        (t) => now.difference(t) > const Duration(seconds: 1));
+    while (_recentSends.isNotEmpty &&
+        now.difference(_recentSends.first) > const Duration(seconds: 1)) {
+      _recentSends.removeAt(0);
+    }
     final frame = parseServerMessage(
       data,
       latencySeconds: latencySeconds,
       fps: _recentSends.length,
+      confidenceThreshold: confidenceThreshold,
     );
     if (frame != null) {
       _controller.add(frame);
@@ -274,8 +281,10 @@ class WebSocketTslStreamService implements TslStreamService {
       _sentAt.remove(_sentAt.keys.first);
     }
     _recentSends.add(now);
-    _recentSends.removeWhere(
-        (t) => now.difference(t) > const Duration(seconds: 1));
+    while (_recentSends.isNotEmpty &&
+        now.difference(_recentSends.first) > const Duration(seconds: 1)) {
+      _recentSends.removeAt(0);
+    }
     channel.sink.add(jsonEncode({
       'schema_version': _schemaVersion,
       'type': 'landmark_frame',
@@ -314,14 +323,19 @@ class WebSocketTslStreamService implements TslStreamService {
 }
 
 final tslStreamServiceProvider = Provider<TslStreamService>((ref) {
-  final (useSimulated, serverUrl) = ref.watch(
-    settingsProvider.select((s) => (s.useSimulatedStream, s.serverUrl)),
+  final (useSimulated, serverUrl, confidenceThreshold) = ref.watch(
+    settingsProvider.select(
+        (s) => (s.useSimulatedStream, s.serverUrl, s.confidenceThreshold)),
   );
   final accessToken =
       ref.watch(authProvider.select((s) => s.accessToken));
   final TslStreamService service = useSimulated
       ? SimulatedTslStreamService()
-      : WebSocketTslStreamService(baseUrl: serverUrl, accessToken: accessToken);
+      : WebSocketTslStreamService(
+          baseUrl: serverUrl,
+          accessToken: accessToken,
+          confidenceThreshold: confidenceThreshold,
+        );
   ref.onDispose(() => service.dispose());
   return service;
 });

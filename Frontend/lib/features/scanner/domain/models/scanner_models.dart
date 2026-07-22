@@ -47,18 +47,19 @@ class FeatureVectorFrame {
   final List<double> positionFeatures;
   final List<double> velocityFeatures;
   final List<double> accelerationFeatures;
+  final List<double> fullVector;
 
-  const FeatureVectorFrame({
+  FeatureVectorFrame({
     required this.positionFeatures,
     required this.velocityFeatures,
     required this.accelerationFeatures,
-  });
-
-  List<double> get fullVector => [
-        ...positionFeatures,
-        ...velocityFeatures,
-        ...accelerationFeatures,
-      ];
+    List<double>? fullVector,
+  }) : fullVector = fullVector ??
+            [
+              ...positionFeatures,
+              ...velocityFeatures,
+              ...accelerationFeatures,
+            ];
 }
 
 /// Live state of the connection to the TSL stream backend (real or simulated).

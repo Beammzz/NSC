@@ -203,6 +203,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             underline: const SizedBox(),
                             items: const [
                               DropdownMenuItem(
+                                value: '480p',
+                                child: Text('480p SD'),
+                              ),
+                              DropdownMenuItem(
                                 value: '720p',
                                 child: Text('720p (แนะนำ)'),
                               ),

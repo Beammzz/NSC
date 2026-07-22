@@ -418,12 +418,8 @@ class InferenceEngine:
                     for i in sorted_indices[:TOP_K]
                     if float(res[i]) > TOP_MIN_PROB
                 ]
-            word = (
-                ""
-                if is_uncertain
-                else model.idx_to_label.get(
-                    int(sorted_indices[0]), f"Label {int(sorted_indices[0])}"
-                )
+            word = model.idx_to_label.get(
+                int(sorted_indices[0]), f"Label {int(sorted_indices[0])}"
             )
             return PredictionResult(
                 word=word,

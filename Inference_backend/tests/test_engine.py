@@ -91,14 +91,14 @@ class TestPrediction:
         assert fake.invocations == 10
         assert fake.last_input.shape == (1, 30, 441)
 
-    def test_uncertain_below_threshold_blanks_word(self, artifacts):
+    def test_uncertain_below_threshold_preserves_word_with_flag(self, artifacts):
         engine, _ = make_engine(artifacts, [0.3, 0.3, 0.3, 0.1])
         session = engine.session()
         result = None
         for i, frame in enumerate(moving_frames()):
             result = session.add_frame(frame, i * (1000.0 / 12.0))
         assert result.is_uncertain
-        assert result.word == ""
+        assert result.word == "รัก"
         assert result.confidence == pytest.approx(0.3)
 
     def test_no_hands_bypasses_to_idle(self, artifacts):
