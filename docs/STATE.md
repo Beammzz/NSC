@@ -1,5 +1,22 @@
 # State
 
+## Goal (2026-07-23): revert pose cadence to 150ms
+User: "revert hand+pose back to full model". Investigated first — model ASSETS were already
+full on every side (pose_landmarker_full.task 9,398,198 B in Frontend assets + Backend;
+hand_landmarker has no lite variant upstream; no `lite` reference in Frontend/lib or Kotlin),
+so nothing to revert there. What was actually downgraded in commit 51e7c7b was cadence:
+`ScannerTuning.poseIntervalMs` 150L -> 250L. User chose to revert that knob (accuracy over the
+fps/heat headroom); solo numHands=1 tracker left as is.
+Change: CameraPreviewView.kt:67 `poseIntervalMs` 250L -> 150L + doc comment rewritten to record
+the measured cost (p50 pose 107-112ms, ~72% executor busy, ~52% duty of one thermally-clamped
+core) instead of the 250ms rationale.
+EDITED-UNVERIFIED: no build run — user is away from the phone (no adb) and asked not to build.
+To confirm, run: `cd Frontend && flutter build apk --release`.
+SHIPPING NOTE: this is a Kotlin default, so it is NOT Shorebird-patchable — needs
+`shorebird release android`. The freeze-respecting alternative (still not built) is a Dart
+`configure` caller on the `signmind/camera` channel sending `{'poseIntervalMs': 150}`; there is
+still no Dart caller for `configure`.
+
 ## Goal (2026-07-21): scanner performance optimization round
 User: requested investigation and fix for scanner performance issues.
 Optimizations implemented across Flutter and Native layers:

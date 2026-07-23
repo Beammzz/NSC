@@ -55,16 +55,17 @@ object ScannerTuning {
     /**
      * Pose refresh cadence. Training and tsl_live_inference.py run pose EVERY
      * frame, so pose values that hold then jump are a distribution the model
-     * never saw — smaller steps favor accuracy. But the 150ms setting assumed a
-     * 58-102ms CPU pose run; measured 2026-07-21 it is p50 107-112ms across
-     * three independent captures, so 150ms kept the pose executor ~72% busy and
-     * burned ~52% duty of one core — while the vendor thermal daemon holds every
-     * core at 61% of its rated clock. Back to 250ms (the cadence that shipped
-     * 2026-07-19) to return that budget to the hand graph, which is on the
-     * critical path; pose only feeds shoulder-width normalization and the torso
-     * overlay, both slow-moving.
+     * never saw — smaller steps favor accuracy, which is why this is 150ms.
+     * Known cost (measured 2026-07-21, p50 pose run 107-112ms across three
+     * captures — the 150ms setting originally assumed 58-102ms): the pose
+     * executor sits ~72% busy, ~52% duty of one core, while the vendor thermal
+     * daemon holds every core at 61% of its rated clock. 250ms was tried
+     * 2026-07-21 to give that budget back to the hand graph on the critical
+     * path (pose only feeds shoulder-width normalization and the torso
+     * overlay), and reverted here on 2026-07-23 by user request: accuracy over
+     * the fps/heat headroom.
      */
-    @Volatile var poseIntervalMs: Long = 250L
+    @Volatile var poseIntervalMs: Long = 150L
 
     /**
      * How long the 1-hand fast tracker may run before the 2-hand instance
