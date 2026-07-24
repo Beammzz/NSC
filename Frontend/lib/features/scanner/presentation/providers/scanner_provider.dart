@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:signmind/core/services/tts_service.dart';
+import 'package:signmind/core/widgets/main_scaffold.dart';
 import 'package:signmind/features/scanner/data/services/feature_vector_builder.dart';
 import 'package:signmind/features/scanner/data/services/landmark_extraction_service.dart';
 import 'package:signmind/features/scanner/data/services/tsl_stream_service.dart';
@@ -13,12 +14,17 @@ class ScannerNotifier extends Notifier<ScannerState> {
   StreamSubscription<ConnectionStatus>? _statusSub;
   StreamSubscription<bool>? _ttsSub;
   DateTime _lastCosmeticWrite = DateTime.fromMillisecondsSinceEpoch(0);
+  ScannerState? _savedState;
 
   @override
   ScannerState build() {
     final landmarkService = ref.watch(landmarkExtractionServiceProvider);
     final streamService = ref.watch(tslStreamServiceProvider);
     final ttsService = ref.watch(ttsServiceProvider);
+    final isActive = ref.watch(isScannerActiveProvider);
+
+    final initialState = _savedState ?? ScannerState.initial();
+    _savedState = initialState;
 
     _frameSub?.cancel();
     _streamSub?.cancel();
@@ -71,7 +77,7 @@ class ScannerNotifier extends Notifier<ScannerState> {
       }
       _lastCosmeticWrite = now;
 
-      state = state.copyWith(
+      final newState = state.copyWith(
         currentWord: frame.word,
         confidence: frame.confidence,
         fps: frame.fps,
@@ -79,14 +85,20 @@ class ScannerNotifier extends Notifier<ScannerState> {
         sentence: newSentence,
         demoPhase: frame.isDetecting ? 0 : 1,
       );
+      _savedState = newState;
+      state = newState;
     });
 
     _statusSub = streamService.connectionStatus.listen((status) {
-      state = state.copyWith(connectionStatus: status);
+      final newState = state.copyWith(connectionStatus: status);
+      _savedState = newState;
+      state = newState;
     });
 
     _ttsSub = ttsService.isSpeakingStream.listen((speaking) {
-      state = state.copyWith(isSpeaking: speaking);
+      final newState = state.copyWith(isSpeaking: speaking);
+      _savedState = newState;
+      state = newState;
     });
 
     ref.onDispose(() {
@@ -94,41 +106,65 @@ class ScannerNotifier extends Notifier<ScannerState> {
       _streamSub?.cancel();
       _statusSub?.cancel();
       _ttsSub?.cancel();
+      landmarkService.stop();
+      streamService.stop();
     });
 
-    landmarkService.start();
-    streamService.start();
-
-    return ScannerState.initial();
-  }
-
-  void toggleScan() {
-    final landmarkService = ref.read(landmarkExtractionServiceProvider);
-    final streamService = ref.read(tslStreamServiceProvider);
-    final newScanning = !state.isScanning;
-    if (newScanning) {
+    if (isActive && initialState.isScanning) {
       landmarkService.start();
       streamService.start();
     } else {
       landmarkService.stop();
       streamService.stop();
     }
-    state = state.copyWith(isScanning: newScanning);
+
+    return initialState;
+  }
+
+  void toggleScan() {
+    final landmarkService = ref.read(landmarkExtractionServiceProvider);
+    final streamService = ref.read(tslStreamServiceProvider);
+    final isActive = ref.read(isScannerActiveProvider);
+    final newScanning = !state.isScanning;
+    if (newScanning && isActive) {
+      landmarkService.start();
+      streamService.start();
+    } else {
+      landmarkService.stop();
+      streamService.stop();
+    }
+    final newState = state.copyWith(isScanning: newScanning);
+    _savedState = newState;
+    state = newState;
   }
 
   void clearSentence() {
-    state = state.copyWith(sentence: []);
+    final newState = state.copyWith(sentence: []);
+    _savedState = newState;
+    state = newState;
   }
 
   Future<void> speakSentence() async {
     if (state.sentence.isEmpty || state.isSpeaking) return;
-    state = state.copyWith(isSpeaking: true);
+    var newState = state.copyWith(isSpeaking: true);
+    _savedState = newState;
+    state = newState;
     await ref.read(ttsServiceProvider).speak(state.sentence.join(' '));
-    state = state.copyWith(isSpeaking: false);
+    newState = state.copyWith(isSpeaking: false);
+    _savedState = newState;
+    state = newState;
   }
 }
 
 final scannerProvider = NotifierProvider<ScannerNotifier, ScannerState>(ScannerNotifier.new);
+
+/// True when the user is actively viewing a screen with camera recognition
+/// (either the Scanner tab at index 0 or an exercise practice screen).
+final isScannerActiveProvider = Provider<bool>((ref) {
+  final tabIndex = ref.watch(bottomTabIndexProvider);
+  final mountOverride = ref.watch(cameraMountOverrideProvider);
+  return tabIndex == 0 || mountOverride;
+});
 
 /// Latest raw landmark frame while scanning (frozen on pause), fed by
 /// [ScannerNotifier]'s frame subscription. Deliberately OUTSIDE ScannerState:
@@ -161,3 +197,4 @@ class CameraMountOverride extends Notifier<bool> {
 
 final cameraMountOverrideProvider =
     NotifierProvider<CameraMountOverride, bool>(CameraMountOverride.new);
+

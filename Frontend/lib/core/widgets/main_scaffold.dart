@@ -122,3 +122,5 @@ class BottomTabIndex extends Notifier<int> {
 
 final bottomTabIndexProvider =
     NotifierProvider<BottomTabIndex, int>(BottomTabIndex.new);
+
+

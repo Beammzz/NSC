@@ -2,13 +2,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:signmind/features/settings/presentation/providers/ota_update_provider.dart';
 import 'package:signmind/features/settings/presentation/providers/settings_provider.dart';
 import 'package:signmind/features/settings/presentation/screens/settings_screen.dart';
 
-Future<ProviderContainer> makeContainer() async {
+import 'ota_update_provider_test.dart';
+
+Future<ProviderContainer> makeContainer({ShorebirdService? shorebirdService}) async {
   final prefs = await SharedPreferences.getInstance();
   return ProviderContainer(
-    overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
+    overrides: [
+      sharedPreferencesProvider.overrideWithValue(prefs),
+      shorebirdServiceProvider.overrideWithValue(
+        shorebirdService ?? FakeShorebirdService(available: false),
+      ),
+    ],
   );
 }
 
@@ -77,10 +85,7 @@ void main() {
 
   testWidgets('Server URL setting is editable when demo mode is off and persists',
       (WidgetTester tester) async {
-    final prefs = await SharedPreferences.getInstance();
-    final container = ProviderContainer(
-      overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
-    );
+    final container = await makeContainer();
     addTearDown(container.dispose);
 
     await tester.pumpWidget(
@@ -109,4 +114,60 @@ void main() {
     expect(container.read(settingsProvider).useSimulatedStream, isTrue);
     expect(find.text('โหมดสาธิตออฟไลน์ (Simulated Mode)'), findsOneWidget);
   });
+
+  testWidgets('SettingsScreen displays Shorebird patch version and download/restart flow',
+      (WidgetTester tester) async {
+    final prefs = await SharedPreferences.getInstance();
+    final fakeService = FakeShorebirdService(
+      available: true,
+      patchNum: 3,
+      updateAvailable: true,
+    );
+    final container = ProviderContainer(
+      overrides: [
+        sharedPreferencesProvider.overrideWithValue(prefs),
+        shorebirdServiceProvider.overrideWithValue(fakeService),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: SettingsScreen()),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    // Verify Shorebird version string matches patch
+    expect(find.text('SignMind AI v1.0.0 (Patch #3)'), findsOneWidget);
+
+    // Verify update available button exists
+    final downloadBtn = find.byKey(const Key('downloadUpdateButton'));
+    await tester.ensureVisible(downloadBtn);
+    expect(downloadBtn, findsOneWidget);
+
+    // Tap download button
+    await tester.tap(downloadBtn);
+    await tester.pump();
+
+    // Verify downloading state
+    expect(find.text('กำลังดาวน์โหลดอัปเดต...'), findsOneWidget);
+
+    // Wait for download to finish
+    await tester.pumpAndSettle();
+
+    // Verify restart app button is displayed
+    final restartBtn = find.byKey(const Key('restartAppButton'));
+    await tester.ensureVisible(restartBtn);
+    expect(restartBtn, findsOneWidget);
+    expect(find.text('รีสตาร์ทแอปพลิเคชัน (Restart App)'), findsOneWidget);
+
+    // Tap restart button
+    await tester.tap(restartBtn);
+    await tester.pumpAndSettle();
+    expect(fakeService.restartCalled, isTrue);
+  });
 }
+

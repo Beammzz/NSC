@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:signmind/core/services/tts_service.dart';
+import 'package:signmind/core/widgets/main_scaffold.dart';
 import 'package:signmind/features/scanner/data/services/tsl_stream_service.dart';
 import 'package:signmind/features/scanner/domain/models/scanner_models.dart';
 import 'package:signmind/features/scanner/presentation/providers/scanner_provider.dart';
@@ -58,5 +59,22 @@ void main() {
       expect(container.read(scannerProvider).sentence.contains('ขอบคุณ'), true);
       expect(tts.isSpeaking, true);
     });
+
+    test('isScannerActiveProvider reports true only when scanner tab or mount override is active', () async {
+      final container = await makeContainer();
+      addTearDown(container.dispose);
+
+      // Default bottomTabIndex is 0 (Scanner tab), mountOverride is false -> active
+      expect(container.read(isScannerActiveProvider), true);
+
+      // Switch tab to Learn (index 1)
+      container.read(bottomTabIndexProvider.notifier).setIndex(1);
+      expect(container.read(isScannerActiveProvider), false);
+
+      // Enable exercise practice mount override
+      container.read(cameraMountOverrideProvider.notifier).set(true);
+      expect(container.read(isScannerActiveProvider), true);
+    });
   });
 }
+

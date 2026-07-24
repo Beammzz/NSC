@@ -83,7 +83,6 @@ class AuthNotifier extends Notifier<AuthState> {
           isLoading: false,
           isSimulatedGuest: false,
         );
-        ref.read(tslStreamServiceProvider).start();
         return true;
       } else {
         String msg = 'เข้าสู่ระบบไม่สำเร็จ ($statusCode)';
@@ -147,7 +146,6 @@ class AuthNotifier extends Notifier<AuthState> {
           isLoading: false,
           isSimulatedGuest: false,
         );
-        ref.read(tslStreamServiceProvider).start();
         return true;
       } else {
         String msg = 'สมัครสมาชิกไม่สำเร็จ ($statusCode)';
