@@ -50,7 +50,7 @@ export default function Nav() {
   return (
     <nav className="sidebar">
       <div className="brand" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <img src="/icon.png" alt="SignMind Logo" style={{ width: 32, height: 32, borderRadius: 6, objectFit: 'contain' }} />
+        <img src="/icon.png" alt="SignMind Logo" style={{ width: 32, height: 32, borderRadius: 6, objectFit: 'contain', filter: 'brightness(0) invert(1)' }} />
         <div>
           SignMind
           <small>AI backend admin</small>

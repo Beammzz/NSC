@@ -61,6 +61,7 @@ class LandingScreen extends StatelessWidget {
                             child: Image.asset(
                               'assets/icons/app_icon.png',
                               fit: BoxFit.contain,
+                              color: context.isDarkMode ? Colors.white : null,
                             ),
                           ),
                         ),

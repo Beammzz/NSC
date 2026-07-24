@@ -197,6 +197,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                           child: Image.asset(
                             'assets/icons/app_icon.png',
                             fit: BoxFit.contain,
+                            color: context.isDarkMode ? Colors.white : null,
                           ),
                         ),
                       ),
