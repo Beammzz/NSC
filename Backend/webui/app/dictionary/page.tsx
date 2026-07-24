@@ -5,6 +5,7 @@ import {
   fetchAdminSigns,
   fetchSign,
   createSign,
+  updateSignCategory,
   deleteSign,
   uploadSignRecording,
   importSignFromThsl,
@@ -14,11 +15,38 @@ import {
   KeypointFrame,
 } from '../../lib/api';
 
+const COMMON_CATEGORIES = [
+  'คำพื้นฐาน',
+  'กิจวัตรและการกระทำ',
+  'อาหารและเครื่องดื่ม',
+  'ผู้คนและครอบครัว',
+  'ร่างกาย',
+  'อารมณ์ความรู้สึก',
+  'สิ่งของและสถานที่',
+  'สัตว์และธรรมชาติ',
+  'วันและเดือน',
+  'เวลา',
+  'สี',
+  'ตัวเลข',
+  'คำถามและประโยค',
+  'ทั่วไป',
+  'imported',
+];
+
 export default function DictionaryPage() {
   const [signs, setSigns] = useState<LearnSign[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Category inline editing
+  const [editingCategoryWord, setEditingCategoryWord] = useState<string | null>(null);
+  const [editingCategoryValue, setEditingCategoryValue] = useState<string>('');
+  const [savingCategoryWord, setSavingCategoryWord] = useState<string | null>(null);
+
+  // Search & category filter
+  const [searchQuery, setSearchQuery] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
 
   // New-sign form.
   const [newWord, setNewWord] = useState('');
@@ -167,6 +195,24 @@ export default function DictionaryPage() {
     }
   }
 
+  async function handleSaveCategory(word: string) {
+    const cat = editingCategoryValue.trim();
+    setSavingCategoryWord(word);
+    setNotice(null);
+    try {
+      await updateSignCategory(word, cat);
+      setSigns((prev) =>
+        prev.map((item) => (item.word === word ? { ...item, category: cat } : item))
+      );
+      setNotice({ type: 'success', text: `Updated category for "${word}" to "${cat || '—'}".` });
+      setEditingCategoryWord(null);
+    } catch (err) {
+      fail('Failed to update category', err);
+    } finally {
+      setSavingCategoryWord(null);
+    }
+  }
+
   function closePreview() {
     setPreviewWord(null);
     setPreviewFrames(null);
@@ -195,8 +241,28 @@ export default function DictionaryPage() {
 
   const withAnimation = signs.filter((s) => s.has_animation).length;
 
+  const categoriesList = Array.from(
+    new Set(signs.map((s) => s.category?.trim() || '—'))
+  ).sort();
+
+  const filteredSigns = signs.filter((s) => {
+    const catText = s.category?.trim() || '—';
+    const matchesSearch =
+      searchQuery.trim() === '' ||
+      s.word.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      catText.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesCat = categoryFilter === '' || catText === categoryFilter;
+    return matchesSearch && matchesCat;
+  });
+
   return (
     <div>
+      <datalist id="category-suggestions">
+        {COMMON_CATEGORIES.map((cat) => (
+          <option key={cat} value={cat} />
+        ))}
+      </datalist>
+
       <h1>Dictionary</h1>
       <p className="subtitle">
         Build the recorded sign library: reindex label map, import from th-sl.com, record in-browser, or upload video files.
@@ -300,7 +366,7 @@ export default function DictionaryPage() {
       <div className="row" style={{ marginBottom: 12, gap: 8, alignItems: 'center' }}>
         <span className="chip info">
           <span className="dot" />
-          {signs.length} sign{signs.length !== 1 ? 's' : ''} · {withAnimation} with animation
+          {filteredSigns.length} / {signs.length} sign{signs.length !== 1 ? 's' : ''} · {withAnimation} with animation
         </span>
         <span className="chip good">
           <span className="dot" />
@@ -308,10 +374,47 @@ export default function DictionaryPage() {
         </span>
       </div>
 
+      <div className="row" style={{ marginBottom: 16, gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <input
+          type="text"
+          placeholder="🔍 Search word or category..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          style={{ maxWidth: 260 }}
+        />
+        <select
+          value={categoryFilter}
+          onChange={(e) => setCategoryFilter(e.target.value)}
+          style={{ maxWidth: 240 }}
+        >
+          <option value="">All Categories ({categoriesList.length})</option>
+          {categoriesList.map((cat) => (
+            <option key={cat} value={cat}>
+              {cat} ({signs.filter((s) => (s.category?.trim() || '—') === cat).length})
+            </option>
+          ))}
+        </select>
+        {(searchQuery || categoryFilter) && (
+          <button
+            type="button"
+            className="secondary"
+            style={{ fontSize: 12, padding: '6px 12px' }}
+            onClick={() => {
+              setSearchQuery('');
+              setCategoryFilter('');
+            }}
+          >
+            Clear filters
+          </button>
+        )}
+      </div>
+
       {loading ? (
         <div className="empty">Loading signs...</div>
       ) : signs.length === 0 ? (
         <div className="empty">No signs yet — reindex vocabulary or create the first sign above.</div>
+      ) : filteredSigns.length === 0 ? (
+        <div className="empty">No signs match the search/filter criteria.</div>
       ) : (
         <div className="tablewrap">
           <table>
@@ -324,10 +427,66 @@ export default function DictionaryPage() {
               </tr>
             </thead>
             <tbody>
-              {signs.map((s) => (
+              {filteredSigns.map((s) => (
                 <tr key={s.word}>
                   <td className="word">{s.word}</td>
-                  <td>{s.category || '—'}</td>
+                  <td>
+                    {editingCategoryWord === s.word ? (
+                      <span className="row" style={{ gap: 4, margin: 0, alignItems: 'center', flexWrap: 'nowrap' }}>
+                        <input
+                          type="text"
+                          list="category-suggestions"
+                          value={editingCategoryValue}
+                          onChange={(e) => setEditingCategoryValue(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveCategory(s.word);
+                            if (e.key === 'Escape') setEditingCategoryWord(null);
+                          }}
+                          autoFocus
+                          disabled={savingCategoryWord === s.word}
+                          placeholder="Category"
+                          style={{
+                            padding: '4px 8px',
+                            fontSize: 13,
+                            maxWidth: 160,
+                          }}
+                        />
+                        <button
+                          type="button"
+                          style={{ fontSize: 11, padding: '4px 8px' }}
+                          disabled={savingCategoryWord === s.word}
+                          onClick={() => handleSaveCategory(s.word)}
+                        >
+                          {savingCategoryWord === s.word ? '...' : 'Save'}
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary"
+                          style={{ fontSize: 11, padding: '4px 8px' }}
+                          disabled={savingCategoryWord === s.word}
+                          onClick={() => setEditingCategoryWord(null)}
+                        >
+                          Cancel
+                        </button>
+                      </span>
+                    ) : (
+                      <span className="row" style={{ gap: 6, margin: 0, alignItems: 'center' }}>
+                        <span>{s.category || '—'}</span>
+                        <button
+                          type="button"
+                          className="secondary"
+                          style={{ fontSize: 11, padding: '2px 6px', cursor: 'pointer' }}
+                          onClick={() => {
+                            setEditingCategoryWord(s.word);
+                            setEditingCategoryValue(s.category || '');
+                          }}
+                          title="Edit category"
+                        >
+                          ✏️ Edit
+                        </button>
+                      </span>
+                    )}
+                  </td>
                   <td>
                     <span className={`chip ${s.has_animation ? 'info' : 'warning'}`}>
                       <span className="dot" />

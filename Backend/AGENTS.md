@@ -25,6 +25,7 @@ Golang REST & WebSocket API server: gateway between the Flutter client and the P
 | `backend/internal/predlog/` | Pure-Go SQLite (`modernc.org/sqlite`) prediction history store supporting insertion, paginated query, count, clearing, and configurable auto-cleaning (`SetAutoCleanMax`/`Prune`) |
 | `backend/internal/webui/` | Embeds and serves the compiled Next.js admin static export (`dist/`) at `/` |
 | `backend/webui/` | Next.js 15 + React 19 static admin web application source code (nav sidebar: Server dashboard, TSL Model [Predictions Log, AI Logs, Settings (Model Upload, Prediction Log Auto-Cleaning, Runtime Model Tuning, Active Model Summary, Guide)], LLM Model [Coming soon], Learning, Dictionary [webcam recorder, file upload, th-sl.com link import, preview], Users; including AuthProvider, login page, parameter documentation, and user management UI) |
+| `backend/scripts/` | Maintenance and utility scripts (`backup.py` for database binary backup, SQL dump, and dictionary keypoint animation JSON/SQL export to `data/backups/`) |
 
 ---
 

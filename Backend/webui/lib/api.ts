@@ -325,6 +325,10 @@ export function createSign(word: string, category: string): Promise<{ word: stri
   });
 }
 
+export function updateSignCategory(word: string, category: string): Promise<{ word: string; category: string }> {
+  return createSign(word, category);
+}
+
 export function deleteSign(word: string): Promise<void> {
   return sendJSON<void>('DELETE', `/api/v1/admin/learn/signs/${encodeURIComponent(word)}`);
 }
