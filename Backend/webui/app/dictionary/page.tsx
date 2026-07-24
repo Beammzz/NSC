@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState, FormEvent } from 'react';
+import { Suspense, useEffect, useRef, useState, FormEvent } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   fetchAdminSigns,
   fetchSign,
@@ -33,7 +34,41 @@ const COMMON_CATEGORIES = [
   'imported',
 ];
 
-export default function DictionaryPage() {
+type TabType = 'dictionary' | 'settings';
+
+export default function DictionaryPageWrapper() {
+  return (
+    <Suspense fallback={<div className="empty">Loading Dictionary...</div>}>
+      <DictionaryPage />
+    </Suspense>
+  );
+}
+
+function DictionaryPage() {
+  const searchParams = useSearchParams();
+  const rawTab = searchParams.get('tab');
+  let initialTab: TabType = 'dictionary';
+  if (rawTab === 'settings') {
+    initialTab = 'settings';
+  }
+  const [activeTab, setActiveTab] = useState<TabType>(initialTab);
+
+  useEffect(() => {
+    const raw = searchParams.get('tab');
+    if (raw === 'settings') {
+      setActiveTab('settings');
+    } else if (raw === 'dictionary' || raw === 'words') {
+      setActiveTab('dictionary');
+    }
+  }, [searchParams]);
+
+  const switchTab = (tab: TabType) => {
+    setActiveTab(tab);
+    const newUrl = new URL(window.location.href);
+    newUrl.searchParams.set('tab', tab);
+    window.history.replaceState(null, '', newUrl.toString());
+  };
+
   const [signs, setSigns] = useState<LearnSign[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -265,294 +300,314 @@ export default function DictionaryPage() {
 
       <h1>Dictionary</h1>
       <p className="subtitle">
-        Build the recorded sign library: reindex label map, import from th-sl.com, record in-browser, or upload video files.
+        Manage Thai Sign Language dictionary words, import signs, record animations, and configure dictionary settings
       </p>
+
+      <div className="tab-bar">
+        <button
+          type="button"
+          className={`tab-btn ${activeTab === 'dictionary' ? 'active' : ''}`}
+          onClick={() => switchTab('dictionary')}
+        >
+          Dictionary Words
+        </button>
+        <button
+          type="button"
+          className={`tab-btn ${activeTab === 'settings' ? 'active' : ''}`}
+          onClick={() => switchTab('settings')}
+        >
+          Settings
+        </button>
+      </div>
 
       {notice && <div className={`notice ${notice.type}`}>{notice.text}</div>}
       {error && <div className="notice error">Failed to load signs: {error}</div>}
 
-      {/* Reindex Card */}
-      <div className="card" style={{ marginBottom: 20 }}>
-        <h2>Reindex Vocabulary from Label Map (220-class map)</h2>
-        <p className="subtitle" style={{ marginTop: 0 }}>
-          Automatically index all 219 dictionary words from <code>label_map (1).json</code> into the dictionary database.
-          Idle gesture <code>ไม่ทำอะไรเลย</code> (Class 217) is automatically excluded from word counts.
-        </p>
-        <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
-          <button type="button" onClick={handleReindexDefault} disabled={reindexing}>
-            {reindexing ? 'Reindexing Vocabulary...' : '⚡ Reindex 219 Words from label_map (1).json'}
-          </button>
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => jsonFileInputRef.current?.click()}
-            disabled={reindexing}
-          >
-            Upload Custom label_map.json
-          </button>
-          <input
-            type="file"
-            ref={jsonFileInputRef}
-            accept=".json"
-            style={{ display: 'none' }}
-            onChange={handleCustomJsonReindex}
-          />
-        </div>
-      </div>
+      {activeTab === 'dictionary' && (
+        <>
+          <div className="row" style={{ gap: 20, marginBottom: 20, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+            <div className="card" style={{ flex: '1 1 300px', maxWidth: 620, margin: 0 }}>
+              <h2>Import from th-sl.com</h2>
+              <form onSubmit={handleImportThsl}>
+                <label className="field">
+                  <span>th-sl.com Link</span>
+                  <input
+                    type="url"
+                    value={importUrl}
+                    onChange={(e) => setImportUrl(e.target.value)}
+                    placeholder="https://www.th-sl.com/75993/"
+                    required
+                  />
+                </label>
+                <label className="field">
+                  <span>Word (optional - auto-detected if blank)</span>
+                  <input
+                    value={importWord}
+                    onChange={(e) => setImportWord(e.target.value)}
+                    placeholder="e.g. ว่าไง"
+                  />
+                </label>
+                <label className="field">
+                  <span>Category (optional)</span>
+                  <input
+                    value={importCategory}
+                    onChange={(e) => setImportCategory(e.target.value)}
+                    placeholder="e.g. greetings"
+                  />
+                </label>
+                <button type="submit" disabled={importing || importUrl.trim() === ''}>
+                  {importing ? 'Importing & Extracting...' : 'Import Sign from th-sl.com'}
+                </button>
+              </form>
+            </div>
 
-      <div className="row" style={{ gap: 20, marginBottom: 20, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-        <div className="card" style={{ flex: '1 1 300px', maxWidth: 620, margin: 0 }}>
-          <h2>Import from th-sl.com</h2>
-          <form onSubmit={handleImportThsl}>
-            <label className="field">
-              <span>th-sl.com Link</span>
-              <input
-                type="url"
-                value={importUrl}
-                onChange={(e) => setImportUrl(e.target.value)}
-                placeholder="https://www.th-sl.com/75993/"
-                required
-              />
-            </label>
-            <label className="field">
-              <span>Word (optional - auto-detected if blank)</span>
-              <input
-                value={importWord}
-                onChange={(e) => setImportWord(e.target.value)}
-                placeholder="e.g. ว่าไง"
-              />
-            </label>
-            <label className="field">
-              <span>Category (optional)</span>
-              <input
-                value={importCategory}
-                onChange={(e) => setImportCategory(e.target.value)}
-                placeholder="e.g. greetings"
-              />
-            </label>
-            <button type="submit" disabled={importing || importUrl.trim() === ''}>
-              {importing ? 'Importing & Extracting...' : 'Import Sign from th-sl.com'}
-            </button>
-          </form>
-        </div>
+            <div className="card" style={{ flex: '1 1 300px', maxWidth: 620, margin: 0 }}>
+              <h2>New sign (Manual)</h2>
+              <form onSubmit={handleCreateSign}>
+                <label className="field">
+                  <span>Word (shown in the app)</span>
+                  <input
+                    value={newWord}
+                    onChange={(e) => setNewWord(e.target.value)}
+                    placeholder="สวัสดี"
+                    required
+                  />
+                </label>
+                <label className="field">
+                  <span>Category</span>
+                  <input
+                    value={newCategory}
+                    onChange={(e) => setNewCategory(e.target.value)}
+                    placeholder="greetings"
+                  />
+                </label>
+                <button type="submit" disabled={savingSign || newWord.trim() === ''}>
+                  {savingSign ? 'Saving...' : 'Save sign'}
+                </button>
+              </form>
+            </div>
+          </div>
 
-        <div className="card" style={{ flex: '1 1 300px', maxWidth: 620, margin: 0 }}>
-          <h2>New sign (Manual)</h2>
-          <form onSubmit={handleCreateSign}>
-            <label className="field">
-              <span>Word (shown in the app)</span>
-              <input
-                value={newWord}
-                onChange={(e) => setNewWord(e.target.value)}
-                placeholder="สวัสดี"
-                required
-              />
-            </label>
-            <label className="field">
-              <span>Category</span>
-              <input
-                value={newCategory}
-                onChange={(e) => setNewCategory(e.target.value)}
-                placeholder="greetings"
-              />
-            </label>
-            <button type="submit" disabled={savingSign || newWord.trim() === ''}>
-              {savingSign ? 'Saving...' : 'Save sign'}
-            </button>
-          </form>
-        </div>
-      </div>
+          <div className="row" style={{ marginBottom: 12, gap: 8, alignItems: 'center' }}>
+            <span className="chip info">
+              <span className="dot" />
+              {filteredSigns.length} / {signs.length} sign{signs.length !== 1 ? 's' : ''} · {withAnimation} with animation
+            </span>
+            <span className="chip good">
+              <span className="dot" />
+              Idle gesture "ไม่ทำอะไรเลย" excluded from word count
+            </span>
+          </div>
 
-      <div className="row" style={{ marginBottom: 12, gap: 8, alignItems: 'center' }}>
-        <span className="chip info">
-          <span className="dot" />
-          {filteredSigns.length} / {signs.length} sign{signs.length !== 1 ? 's' : ''} · {withAnimation} with animation
-        </span>
-        <span className="chip good">
-          <span className="dot" />
-          Idle gesture "ไม่ทำอะไรเลย" excluded from word count
-        </span>
-      </div>
-
-      <div className="row" style={{ marginBottom: 16, gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        <input
-          type="text"
-          placeholder="🔍 Search word or category..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          style={{ maxWidth: 260 }}
-        />
-        <select
-          value={categoryFilter}
-          onChange={(e) => setCategoryFilter(e.target.value)}
-          style={{ maxWidth: 240 }}
-        >
-          <option value="">All Categories ({categoriesList.length})</option>
-          {categoriesList.map((cat) => (
-            <option key={cat} value={cat}>
-              {cat} ({signs.filter((s) => (s.category?.trim() || '—') === cat).length})
-            </option>
-          ))}
-        </select>
-        {(searchQuery || categoryFilter) && (
-          <button
-            type="button"
-            className="secondary"
-            style={{ fontSize: 12, padding: '6px 12px' }}
-            onClick={() => {
-              setSearchQuery('');
-              setCategoryFilter('');
-            }}
-          >
-            Clear filters
-          </button>
-        )}
-      </div>
-
-      {loading ? (
-        <div className="empty">Loading signs...</div>
-      ) : signs.length === 0 ? (
-        <div className="empty">No signs yet — reindex vocabulary or create the first sign above.</div>
-      ) : filteredSigns.length === 0 ? (
-        <div className="empty">No signs match the search/filter criteria.</div>
-      ) : (
-        <div className="tablewrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Word</th>
-                <th>Category</th>
-                <th>Animation</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredSigns.map((s) => (
-                <tr key={s.word}>
-                  <td className="word">{s.word}</td>
-                  <td>
-                    {editingCategoryWord === s.word ? (
-                      <span className="row" style={{ gap: 4, margin: 0, alignItems: 'center', flexWrap: 'nowrap' }}>
-                        <input
-                          type="text"
-                          list="category-suggestions"
-                          value={editingCategoryValue}
-                          onChange={(e) => setEditingCategoryValue(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') handleSaveCategory(s.word);
-                            if (e.key === 'Escape') setEditingCategoryWord(null);
-                          }}
-                          autoFocus
-                          disabled={savingCategoryWord === s.word}
-                          placeholder="Category"
-                          style={{
-                            padding: '4px 8px',
-                            fontSize: 13,
-                            maxWidth: 160,
-                          }}
-                        />
-                        <button
-                          type="button"
-                          style={{ fontSize: 11, padding: '4px 8px' }}
-                          disabled={savingCategoryWord === s.word}
-                          onClick={() => handleSaveCategory(s.word)}
-                        >
-                          {savingCategoryWord === s.word ? '...' : 'Save'}
-                        </button>
-                        <button
-                          type="button"
-                          className="secondary"
-                          style={{ fontSize: 11, padding: '4px 8px' }}
-                          disabled={savingCategoryWord === s.word}
-                          onClick={() => setEditingCategoryWord(null)}
-                        >
-                          Cancel
-                        </button>
-                      </span>
-                    ) : (
-                      <span className="row" style={{ gap: 6, margin: 0, alignItems: 'center' }}>
-                        <span>{s.category || '—'}</span>
-                        <button
-                          type="button"
-                          className="secondary"
-                          style={{ fontSize: 11, padding: '2px 6px', cursor: 'pointer' }}
-                          onClick={() => {
-                            setEditingCategoryWord(s.word);
-                            setEditingCategoryValue(s.category || '');
-                          }}
-                          title="Edit category"
-                        >
-                          ✏️ Edit
-                        </button>
-                      </span>
-                    )}
-                  </td>
-                  <td>
-                    <span className={`chip ${s.has_animation ? 'info' : 'warning'}`}>
-                      <span className="dot" />
-                      {s.has_animation ? 'has animation' : 'no animation'}
-                    </span>
-                  </td>
-                  <td>
-                    <span className="row" style={{ gap: 6 }}>
-                      {s.has_animation && (
-                        <button
-                          className="secondary"
-                          style={{ fontSize: 12, padding: '4px 10px' }}
-                          onClick={() => handleShowAnimation(s.word)}
-                        >
-                          {previewWord === s.word ? 'Hide animation' : 'Show animation'}
-                        </button>
-                      )}
-                      <button
-                        className="secondary"
-                        style={{ fontSize: 12, padding: '4px 10px' }}
-                        onClick={() => setRecorderModal({ word: s.word })}
-                      >
-                        {s.has_animation ? 'Re-record' : 'Record'}
-                      </button>
-                      <button
-                        className="secondary"
-                        style={{ fontSize: 12, padding: '4px 10px' }}
-                        onClick={() => {
-                          setUploadTargetWord(s.word);
-                          fileInputRef.current?.click();
-                        }}
-                      >
-                        Upload video
-                      </button>
-                      {confirmDelete === s.word ? (
-                        <>
-                          <button
-                            className="secondary"
-                            style={{ fontSize: 12, padding: '4px 10px' }}
-                            onClick={() => handleDelete(s.word)}
-                          >
-                            Confirm
-                          </button>
-                          <button
-                            className="secondary"
-                            style={{ fontSize: 12, padding: '4px 10px' }}
-                            onClick={() => setConfirmDelete(null)}
-                          >
-                            Cancel
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          className="secondary"
-                          style={{ fontSize: 12, padding: '4px 10px' }}
-                          onClick={() => setConfirmDelete(s.word)}
-                        >
-                          Delete
-                        </button>
-                      )}
-                    </span>
-                  </td>
-                </tr>
+          <div className="row" style={{ marginBottom: 16, gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <input
+              type="text"
+              placeholder="🔍 Search word or category..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{ maxWidth: 260 }}
+            />
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              style={{ maxWidth: 240 }}
+            >
+              <option value="">All Categories ({categoriesList.length})</option>
+              {categoriesList.map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat} ({signs.filter((s) => (s.category?.trim() || '—') === cat).length})
+                </option>
               ))}
-            </tbody>
-          </table>
+            </select>
+            {(searchQuery || categoryFilter) && (
+              <button
+                type="button"
+                className="secondary"
+                style={{ fontSize: 12, padding: '6px 12px' }}
+                onClick={() => {
+                  setSearchQuery('');
+                  setCategoryFilter('');
+                }}
+              >
+                Clear filters
+              </button>
+            )}
+          </div>
+
+          {loading ? (
+            <div className="empty">Loading signs...</div>
+          ) : signs.length === 0 ? (
+            <div className="empty">No signs yet — reindex vocabulary or create the first sign above.</div>
+          ) : filteredSigns.length === 0 ? (
+            <div className="empty">No signs match the search/filter criteria.</div>
+          ) : (
+            <div className="tablewrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Word</th>
+                    <th>Category</th>
+                    <th>Animation</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredSigns.map((s) => (
+                    <tr key={s.word}>
+                      <td className="word">{s.word}</td>
+                      <td>
+                        {editingCategoryWord === s.word ? (
+                          <span className="row" style={{ gap: 4, margin: 0, alignItems: 'center', flexWrap: 'nowrap' }}>
+                            <input
+                              type="text"
+                              list="category-suggestions"
+                              value={editingCategoryValue}
+                              onChange={(e) => setEditingCategoryValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveCategory(s.word);
+                                if (e.key === 'Escape') setEditingCategoryWord(null);
+                              }}
+                              autoFocus
+                              disabled={savingCategoryWord === s.word}
+                              placeholder="Category"
+                              style={{
+                                padding: '4px 8px',
+                                fontSize: 13,
+                                maxWidth: 160,
+                              }}
+                            />
+                            <button
+                              type="button"
+                              style={{ fontSize: 11, padding: '4px 8px' }}
+                              disabled={savingCategoryWord === s.word}
+                              onClick={() => handleSaveCategory(s.word)}
+                            >
+                              {savingCategoryWord === s.word ? '...' : 'Save'}
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary"
+                              style={{ fontSize: 11, padding: '4px 8px' }}
+                              disabled={savingCategoryWord === s.word}
+                              onClick={() => setEditingCategoryWord(null)}
+                            >
+                              Cancel
+                            </button>
+                          </span>
+                        ) : (
+                          <span className="row" style={{ gap: 6, margin: 0, alignItems: 'center' }}>
+                            <span>{s.category || '—'}</span>
+                            <button
+                              type="button"
+                              className="secondary"
+                              style={{ fontSize: 11, padding: '2px 6px', cursor: 'pointer' }}
+                              onClick={() => {
+                                setEditingCategoryWord(s.word);
+                                setEditingCategoryValue(s.category || '');
+                              }}
+                              title="Edit category"
+                            >
+                              ✏️ Edit
+                            </button>
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        <span className={`chip ${s.has_animation ? 'info' : 'warning'}`}>
+                          <span className="dot" />
+                          {s.has_animation ? 'has animation' : 'no animation'}
+                        </span>
+                      </td>
+                      <td>
+                        <span className="row" style={{ gap: 6 }}>
+                          {s.has_animation && (
+                            <button
+                              className="secondary"
+                              style={{ fontSize: 12, padding: '4px 10px' }}
+                              onClick={() => handleShowAnimation(s.word)}
+                            >
+                              {previewWord === s.word ? 'Hide animation' : 'Show animation'}
+                            </button>
+                          )}
+                          <button
+                            className="secondary"
+                            style={{ fontSize: 12, padding: '4px 10px' }}
+                            onClick={() => setRecorderModal({ word: s.word })}
+                          >
+                            {s.has_animation ? 'Re-record' : 'Record'}
+                          </button>
+                          <button
+                            className="secondary"
+                            style={{ fontSize: 12, padding: '4px 10px' }}
+                            onClick={() => {
+                              setUploadTargetWord(s.word);
+                              fileInputRef.current?.click();
+                            }}
+                          >
+                            Upload video
+                          </button>
+                          {confirmDelete === s.word ? (
+                            <>
+                              <button
+                                className="secondary"
+                                style={{ fontSize: 12, padding: '4px 10px' }}
+                                onClick={() => handleDelete(s.word)}
+                              >
+                                Confirm
+                              </button>
+                              <button
+                                className="secondary"
+                                style={{ fontSize: 12, padding: '4px 10px' }}
+                                onClick={() => setConfirmDelete(null)}
+                              >
+                                Cancel
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              className="secondary"
+                              style={{ fontSize: 12, padding: '4px 10px' }}
+                              onClick={() => setConfirmDelete(s.word)}
+                            >
+                              Delete
+                            </button>
+                          )}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+
+      {activeTab === 'settings' && (
+        <div>
+          <div className="card" style={{ maxWidth: 620 }}>
+            <h2>Dictionary Settings & Label Map</h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginTop: 0, marginBottom: '16px' }}>
+              Upload a custom <code>label_map.json</code> file to reindex vocabulary words into the dictionary database.
+              Idle gesture <code>ไม่ทำอะไรเลย</code> (Class 217) is automatically excluded from word counts.
+            </p>
+            <div className="row" style={{ gap: 10, flexWrap: 'wrap', marginBottom: 0 }}>
+              <button
+                type="button"
+                onClick={() => jsonFileInputRef.current?.click()}
+                disabled={reindexing}
+              >
+                {reindexing ? 'Reindexing Vocabulary...' : 'Upload Custom label_map.json'}
+              </button>
+              <input
+                type="file"
+                ref={jsonFileInputRef}
+                accept=".json"
+                style={{ display: 'none' }}
+                onChange={handleCustomJsonReindex}
+              />
+            </div>
+          </div>
         </div>
       )}
 

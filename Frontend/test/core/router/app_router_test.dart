@@ -43,7 +43,7 @@ void main() {
     expect(find.text('ศูนย์แนะนำฟีเจอร์ระบบ'), findsOneWidget);
 
     // Tap CTA to enter main app (/scanner)
-    await tester.tap(find.byKey(const Key('enterMainAppButtonTop')));
+    await tester.tap(find.byKey(const Key('enterMainAppHeroButton')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 200));
 

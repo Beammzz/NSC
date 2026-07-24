@@ -15,8 +15,7 @@ void main() {
     expect(find.text('SignMind AI'), findsOneWidget);
     expect(find.text('ศูนย์แนะนำฟีเจอร์ระบบ'), findsOneWidget);
 
-    // Verify Hero CTA buttons
-    expect(find.byKey(const Key('enterMainAppButtonTop')), findsOneWidget);
+    // Verify Hero CTA button
     expect(find.byKey(const Key('enterMainAppHeroButton')), findsOneWidget);
 
     // Verify all 2 feature introduction cards exist

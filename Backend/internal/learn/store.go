@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -224,6 +225,7 @@ func (s *Store) GetExercise(id int64) (Exercise, error) {
 // CreateExercise inserts an exercise and returns it with its assigned ID.
 // The referenced topic must exist.
 func (s *Store) CreateExercise(e Exercise) (Exercise, error) {
+	e.Word = NormalizeWord(e.Word)
 	var one int
 	err := s.db.QueryRow(`SELECT 1 FROM learn_topics WHERE id = ?`, e.TopicID).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -244,6 +246,7 @@ func (s *Store) CreateExercise(e Exercise) (Exercise, error) {
 
 // UpdateExercise overwrites the editable fields of an existing exercise.
 func (s *Store) UpdateExercise(e Exercise) error {
+	e.Word = NormalizeWord(e.Word)
 	res, err := s.db.Exec(
 		`UPDATE learn_exercises SET topic_id = ?, word = ?, sort_order = ?, pass_confidence = ?, published = ? WHERE id = ?`,
 		e.TopicID, e.Word, e.SortOrder, e.PassConfidence, boolInt(e.Published), e.ID)
@@ -292,8 +295,19 @@ func (s *Store) ListSigns() ([]Sign, error) {
 	return signs, nil
 }
 
+// NormalizeWord trims whitespace and normalizes common Thai typo patterns:
+// - Replaces double sara E ("\u0e40\u0e40") with sara Ae ("\u0e41")
+// - Strips unwanted phinthu diacritics ("\u0e3a")
+func NormalizeWord(w string) string {
+	w = strings.TrimSpace(w)
+	w = strings.ReplaceAll(w, "\u0e40\u0e40", "\u0e41")
+	w = strings.ReplaceAll(w, "\u0e3a", "")
+	return w
+}
+
 // GetSign returns one dictionary entry including its keypoint frames.
 func (s *Store) GetSign(word string) (Sign, error) {
+	word = NormalizeWord(word)
 	var sg Sign
 	var frames sql.NullString
 	err := s.db.QueryRow(
@@ -315,6 +329,7 @@ func (s *Store) GetSign(word string) (Sign, error) {
 // UpsertSign creates or updates a dictionary entry's word + category, leaving
 // any existing keypoint_frames untouched (the admin sign editor flow).
 func (s *Store) UpsertSign(word, category string) error {
+	word = NormalizeWord(word)
 	_, err := s.db.Exec(`
 INSERT INTO learn_signs (word, category) VALUES (?, ?)
 ON CONFLICT (word) DO UPDATE SET category = excluded.category`,
@@ -329,6 +344,7 @@ ON CONFLICT (word) DO UPDATE SET category = excluded.category`,
 // (extracted from a recorded clip). The row must already exist — create it
 // with UpsertSign first; a missing word yields ErrNotFound.
 func (s *Store) SetKeypointFrames(word string, frames json.RawMessage) error {
+	word = NormalizeWord(word)
 	res, err := s.db.Exec(
 		`UPDATE learn_signs SET keypoint_frames = ? WHERE word = ?`,
 		string(frames), word)
@@ -340,6 +356,7 @@ func (s *Store) SetKeypointFrames(word string, frames json.RawMessage) error {
 
 // DeleteSign removes a dictionary entry.
 func (s *Store) DeleteSign(word string) error {
+	word = NormalizeWord(word)
 	res, err := s.db.Exec(`DELETE FROM learn_signs WHERE word = ?`, word)
 	if err != nil {
 		return fmt.Errorf("deleting sign: %w", err)
