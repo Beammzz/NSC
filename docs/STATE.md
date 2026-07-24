@@ -471,8 +471,69 @@ Completed app icon update and installation across both native mobile launcher an
 - 2026-07-24 user (LLM provider): "Cloud api. due to it is thai model I whine I will use
   TyphoonAI that is made by SCB DataX" — LLM provider is Typhoon (OpenAI-compatible HTTP),
   NOT Anthropic. Do not write Anthropic SDK code on this path.
+- 2026-07-25 user (scan vocabulary): "I need to reduce amount of sign available for scan.
+  Please dont change it and also dont change the dictionary database." Do NOT edit label_map.json /
+  the model, and do NOT modify the learn dictionary DB or seed.go (user is expanding seed.go
+  themselves, uncommitted). Scan-reduction owner + mechanism + what "it" refers to NOT yet
+  confirmed — asked user 2026-07-25.
 
 ## Open items
 - Medium/minor review findings deliberately NOT in scope: Flutter token refresh/persistence,
   admin-signup cookie footgun, dangling CountSignupsByIP comment, >72-byte password 500,
   putTuning missing 401-retry.
+
+## Goal (2026-07-25): cartoon sign avatar (done, uncommitted)
+User: avatar "is kinda like nothing but show hand keypoint as dot and face is just circle" —
+redraw cute, keep every keypoint correct, NO re-extraction. Decisions: cartoon + a Flutter
+toggle back to skeleton; missing hands hold last-seen pose; update both renderers.
+DATA (measured from Backend/data/backups/dictionary_keypoints_latest.json): 220 entries /
+3520 frames; frame = 7 pose points + 21 MediaPipe landmarks PER DETECTED HAND, so lengths are
+7 (1832 frames, no hand), 28 (943, one hand), 49 (745, two hands). Pose never zero-filled.
+The old painter threw the hand structure away as 2.6px dots — the redraw is pure rendering.
+BUILT:
+1. sign_avatar.dart: SignAvatarStyle {cartoon, skeleton}; cartoon = filled shirt torso
+   (synthesized hips — no hip landmarks exist), skin neck/forearms, sleeved upper arms, head
+   with hair cap + eyes + blush + smile drawn in a frame rotated to the shoulder tilt, and real
+   five-finger hands (palm polygon [0,1,5,9,13,17] + 5 finger chains) from the recorded
+   landmarks. Hands are matched to wrists by distance (MediaPipe emits detection order, not
+   L/R). A wrist with no hand this frame reuses the most recent hand, re-anchored on the current
+   wrist (search wraps the loop); a wrist with none in the whole clip gets a mitten. All sizes
+   are multiples of shoulder width. New _ViewFit: uniform scale+offset over the bbox of ALL
+   frames (+ reserved torso room in cartoon) — recorded coords span the camera frame, so the old
+   raw x*width mapping ran off the widget edges in both styles.
+2. learn_provider.dart: signAvatarStyleProvider (NotifierProvider — riverpod 3 removed
+   StateProvider), in memory, defaults cartoon. learn_screen.dart _SignDetailAvatar gains a
+   SegmentedButton (ตัวการ์ตูน / จุดคีย์พอยต์).
+3. webui dictionary page.tsx: same cartoon renderer ported; renderAvatarFrame signature is now
+   (ctx, frames, index, size) because held hands and the fit need the whole clip. Skeleton style
+   is Flutter-only; the sparse-frame dot fallback stayed.
+FINGER-CLARITY PASS (user: "Make the finger seperation look clearer"): finger chains now start at
+the knuckle (1/5/9/13/17) instead of the wrist — five chains through the palm were stacking into a
+blob; each finger draws outline-then-fill in sequence (all-outlines-first let the next finger's
+fill erase the line between them); fingers sort farthest-first by mean landmark z; finger width
+0.115 -> 0.105 shoulder width and hand outline halved (curled hands filled in solid black at body
+outline weight). Palm is stroked now, not just filled.
+Verified: flutter analyze clean, flutter test 60/60; `npm run build` clean (/dictionary 4.48 ->
+7.63 kB). Cartoon + skeleton rendered to PNG from real recorded frames (word ถ่ายรูป, 16 frames,
+two hands) via a temp widget test and inspected — figure fits the box, fingers correct, held
+hands track the wrist on the 7-point frames. Temp test deleted.
+UNVERIFIED: the webui canvas visually (build + type-check only, no browser run this session).
+
+## Goal (2026-07-25): Typhoon LLM gloss-refine — autocorrect + reorder/insert ONLY
+Scope: gloss autocorrect + topic-fronting/function-word insertion ONLY (Coach + AI Conversation
+OUT, see Constraints 2026-07-24). Placement planned (NOT built): Backend/internal/llm +
+POST /api/v1/translate/refine (JWT, RFC 7807, fail-open to raw gloss); API key = server env, never APK.
+FACTS verified 2026-07-25:
+- Typhoon model typhoon-v2.5-30b-a3b-instruct; endpoint POST https://api.opentyphoon.ai/v1/chat/completions.
+- Typhoon has NO response_format json_object/json_schema (docs.opentyphoon.ai api-reference+examples).
+  So: strict-JSON system prompt + parse text + server-side validate + 1 retry + hard filter (reject
+  any output word not in the input lattice) — fall back to raw gloss on any failure.
+RESEARCH delivered (claude.ai, 3 files in C:\Users\Sorra\Downloads\files\: tsl_grammar_spec.md,
+tsl_annotated_pairs.json[51 pairs], tsl_ambiguity_cases.json[10]). KEY FINDING: "TSL = OSV
+(กรรม กริยา ประธาน)" is UNSUPPORTED by any source — treat as false. Real job = detect topic-comment
+fronting + INSERT function words (numeral classifiers, ที่/ใน/บน/ด้วย/กับ, เป็น/คือ/อยู่,
+จะ/แล้ว/กำลัง, politeness) + FLAG ambiguity — negation & yes/no-questions are invisible to a
+hands+7-pose recognizer; never silently guess "loves" vs "doesn't love".
+NOTE: user is expanding seed.go (adds ไม่, ที่ไหน/อย่างไร/อะไร) which partly closes the wh/negator
+gaps IF those signs get recorded+trained; the 51 pairs were built on the pre-expansion 150-word set
+(additive only, no removals — existing pairs stay in-vocab).

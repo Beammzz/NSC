@@ -49,7 +49,6 @@ export default function LoginPage() {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="admin@signmind.local"
               required
               autoFocus
               autoComplete="email"
@@ -63,7 +62,6 @@ export default function LoginPage() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
               required
               autoComplete="current-password"
             />
@@ -73,10 +71,6 @@ export default function LoginPage() {
             {submitting ? 'Signing in...' : 'Sign In'}
           </button>
         </form>
-
-        <div className="login-footer">
-          <small>Secured with JWT · HttpOnly cookies · bcrypt</small>
-        </div>
       </div>
     </div>
   );

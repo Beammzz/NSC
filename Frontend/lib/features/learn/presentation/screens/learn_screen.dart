@@ -584,7 +584,43 @@ class _SignDetailAvatar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final detail = ref.watch(signDetailProvider(word));
-    return SignAvatar(word: word, frames: detail.value?.keypointFrames);
+    final style = ref.watch(signAvatarStyleProvider);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SignAvatar(
+          word: word,
+          frames: detail.value?.keypointFrames,
+          style: style,
+        ),
+        const SizedBox(height: 12),
+        SegmentedButton<SignAvatarStyle>(
+          segments: const [
+            ButtonSegment(
+              value: SignAvatarStyle.cartoon,
+              icon: Icon(Icons.face_retouching_natural, size: 18),
+              label: Text('ตัวการ์ตูน'),
+            ),
+            ButtonSegment(
+              value: SignAvatarStyle.skeleton,
+              icon: Icon(Icons.scatter_plot, size: 18),
+              label: Text('จุดคีย์พอยต์'),
+            ),
+          ],
+          selected: {style},
+          showSelectedIcon: false,
+          style: const ButtonStyle(
+            visualDensity: VisualDensity.compact,
+            textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 12)),
+          ),
+          onSelectionChanged: (selection) {
+            ref
+                .read(signAvatarStyleProvider.notifier)
+                .setStyle(selection.first);
+          },
+        ),
+      ],
+    );
   }
 }
 

@@ -993,78 +993,361 @@ function SignRecorder({
   );
 }
 
-// Upper-body edges over the 7 pose points [nose, Lshoulder, Rshoulder, Lelbow,
-// Relbow, Lwrist, Rwrist] — mirrors Flutter's _SignAvatarPainter so the admin
-// preview matches what the app renders.
-const POSE_CONNECTIONS: [number, number][] = [
-  [1, 2],
-  [1, 3],
-  [3, 5],
-  [2, 4],
-  [4, 6],
-];
+// Cartoon avatar renderer — mirrors Flutter's _SignAvatarPainter (cartoon
+// style) so the admin preview matches what the app renders. Frames carry the
+// 7 upper-body pose points [nose, Lshoulder, Rshoulder, Lelbow, Relbow,
+// Lwrist, Rwrist] followed by 21 MediaPipe landmarks per detected hand.
 const AVATAR_ACCENT = '#3987e5'; // --series-1
 const AVATAR_LOOP_MS = 2400;
+const HAND_POINTS = 21;
+// Fingers start at their knuckle, not the wrist: chains through the palm would
+// pile on top of each other and read as one blob. The palm polygon covers the
+// bases.
+const FINGER_CHAINS = [
+  [1, 2, 3, 4],
+  [5, 6, 7, 8],
+  [9, 10, 11, 12],
+  [13, 14, 15, 16],
+  [17, 18, 19, 20],
+];
+const PALM_OUTLINE = [0, 1, 5, 9, 13, 17];
+// The figure carries its own dark outline, so this fixed palette reads on the
+// dark card background.
+const SKIN = '#f3c9a2';
+const SKIN_SHADE = '#e0ae83';
+const OUTLINE = '#2a2e3a';
+const HAIR = '#3b2a24';
+const BLUSH = 'rgba(232,116,107,0.33)';
 
-// Draw one keypoint frame (normalized 0..1 coords) as a skeletal figure.
-function renderAvatarFrame(ctx: CanvasRenderingContext2D, points: KeypointFrame[], size: number) {
+type Vec = { x: number; y: number };
+
+const dist = (a: Vec, b: Vec) => Math.hypot(a.x - b.x, a.y - b.y);
+const unit = (v: Vec, fallback: Vec): Vec => {
+  const len = Math.hypot(v.x, v.y);
+  return len < 1e-6 ? fallback : { x: v.x / len, y: v.y / len };
+};
+const step = (p: Vec, dir: Vec, k: number): Vec => ({ x: p.x + dir.x * k, y: p.y + dir.y * k });
+
+// Uniform scale + offset placing the whole clip inside the canvas. Recorded
+// coordinates span the camera frame, so the raw figure runs off the edges.
+// Measured over EVERY frame so the figure holds still while the clip plays.
+function viewFit(frames: KeypointFrame[][], size: number) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let shoulderW = 0;
+  // The synthesized torso hangs below the recorded points; nothing in the data
+  // marks where it ends, so reserve room for it.
+  let torsoBottom = -Infinity;
+  for (const frame of frames) {
+    for (const p of frame) {
+      minX = Math.min(minX, p.x);
+      maxX = Math.max(maxX, p.x);
+      minY = Math.min(minY, p.y);
+      maxY = Math.max(maxY, p.y);
+    }
+    if (frame.length < 7) continue;
+    const w = dist(frame[1], frame[2]);
+    shoulderW = Math.max(shoulderW, w);
+    torsoBottom = Math.max(torsoBottom, (frame[1].y + frame[2].y) / 2 + w * 1.5);
+  }
+  if (!Number.isFinite(minX) || maxX <= minX) return { scale: size, dx: 0, dy: 0 };
+  if (shoulderW <= 0) shoulderW = maxX - minX;
+  if (!Number.isFinite(torsoBottom)) torsoBottom = maxY;
+
+  // Head, torso sides and limb thickness all live outside the landmarks.
+  const pad = shoulderW * 0.62;
+  minX -= pad;
+  maxX += pad;
+  minY -= pad;
+  maxY = Math.max(maxY + pad * 0.4, torsoBottom);
+
+  const boxW = Math.max(maxX - minX, 1e-6);
+  const boxH = Math.max(maxY - minY, 1e-6);
+  const scale = Math.min(size / boxW, size / boxH);
+  return {
+    scale,
+    dx: (size - boxW * scale) / 2 - minX * scale,
+    dy: (size - boxH * scale) / 2 - minY * scale,
+  };
+}
+
+// Splits a frame's trailing landmarks into 21-point hand blocks. Frames whose
+// tail is not a whole number of hands yield none.
+function handBlocks(frame: KeypointFrame[]): KeypointFrame[][] {
+  const extra = frame.length - 7;
+  if (extra <= 0 || extra % HAND_POINTS !== 0) return [];
+  const blocks: KeypointFrame[][] = [];
+  for (let i = 7; i + HAND_POINTS <= frame.length; i += HAND_POINTS) {
+    blocks.push(frame.slice(i, i + HAND_POINTS));
+  }
+  return blocks;
+}
+
+// Maps a frame's hand blocks onto its two pose wrists — slot 0 belongs to pose
+// point 5, slot 1 to pose point 6. MediaPipe emits hands in detection order,
+// not left/right order, so the pairing is chosen by wrist distance.
+function assignHands(frame: KeypointFrame[]): (KeypointFrame[] | null)[] {
+  const result: (KeypointFrame[] | null)[] = [null, null];
+  const blocks = handBlocks(frame);
+  if (blocks.length === 0) return result;
+  const wrists = [frame[5], frame[6]];
+  if (blocks.length === 1) {
+    const block = blocks[0];
+    const slot = dist(block[0], wrists[0]) <= dist(block[0], wrists[1]) ? 0 : 1;
+    result[slot] = block;
+    return result;
+  }
+  const [a, b] = blocks;
+  const straight = dist(a[0], wrists[0]) + dist(b[0], wrists[1]);
+  const swapped = dist(a[0], wrists[1]) + dist(b[0], wrists[0]);
+  result[0] = straight <= swapped ? a : b;
+  result[1] = straight <= swapped ? b : a;
+  return result;
+}
+
+// Hands to draw for frame [index]. Roughly half of the recorded frames carry
+// no hand landmarks at all (detection drops out), so a wrist without data this
+// frame reuses the most recently seen hand, shifted so its wrist landmark sits
+// on the current wrist point. The search wraps, so frame 0 inherits the tail.
+function handsForFrame(frames: KeypointFrame[][], index: number): (KeypointFrame[] | null)[] {
+  const current = frames[index];
+  const hands = assignHands(current);
+  for (let slot = 0; slot < 2; slot++) {
+    if (hands[slot] !== null) continue;
+    for (let back = 1; back <= frames.length; back++) {
+      const past = frames[(((index - back) % frames.length) + frames.length) % frames.length];
+      if (past.length < 7) continue;
+      const held = assignHands(past)[slot];
+      if (held === null) continue;
+      const wrist = current[5 + slot];
+      const dx = wrist.x - held[0].x;
+      const dy = wrist.y - held[0].y;
+      hands[slot] = held.map((p) => ({ ...p, x: p.x + dx, y: p.y + dy }));
+      break;
+    }
+  }
+  return hands;
+}
+
+// Draw the frame at [index] of [frames] as a cartoon signing figure.
+function renderAvatarFrame(ctx: CanvasRenderingContext2D, frames: KeypointFrame[][], index: number, size: number) {
   ctx.clearRect(0, 0, size, size);
   ctx.fillStyle = '#121211'; // --surface-0
   ctx.fillRect(0, 0, size, size);
+  const points = frames[index] ?? [];
   if (points.length === 0) return;
-  const px = (p: KeypointFrame) => p.x * size;
-  const py = (p: KeypointFrame) => p.y * size;
 
-  if (points.length >= 7) {
-    // Bones: neck (nose -> shoulder midpoint) plus the arm/shoulder edges.
-    ctx.strokeStyle = 'rgba(57,135,229,0.85)';
-    ctx.lineWidth = 3;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(px(points[0]), py(points[0]));
-    ctx.lineTo(((points[1].x + points[2].x) / 2) * size, ((points[1].y + points[2].y) / 2) * size);
-    for (const [a, b] of POSE_CONNECTIONS) {
-      ctx.moveTo(px(points[a]), py(points[a]));
-      ctx.lineTo(px(points[b]), py(points[b]));
-    }
-    ctx.stroke();
+  const fit = viewFit(frames, size);
+  const P = (p: KeypointFrame): Vec => ({ x: p.x * fit.scale + fit.dx, y: p.y * fit.scale + fit.dy });
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
 
-    // Head circle at the nose.
-    ctx.strokeStyle = AVATAR_ACCENT;
-    ctx.lineWidth = 2.2;
-    ctx.beginPath();
-    ctx.arc(px(points[0]), py(points[0]), size * 0.075, 0, Math.PI * 2);
-    ctx.stroke();
-
-    // Joint nodes (shoulders, elbows, wrists).
-    for (let i = 1; i < 7; i++) {
-      ctx.beginPath();
-      ctx.arc(px(points[i]), py(points[i]), 4, 0, Math.PI * 2);
-      ctx.fillStyle = '#ffffff';
-      ctx.fill();
-      ctx.strokeStyle = AVATAR_ACCENT;
-      ctx.lineWidth = 2.2;
-      ctx.stroke();
-    }
-    // Hand keypoints render as smaller dots.
-    ctx.fillStyle = '#ffffff';
-    for (let i = 7; i < points.length; i++) {
-      ctx.beginPath();
-      ctx.arc(px(points[i]), py(points[i]), 2.6, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  } else {
-    // Unknown/sparse layout: plain dots.
+  if (points.length < 7) {
+    // Unknown/sparse layout (e.g. the 2-point server stub): plain dots.
     for (const p of points) {
+      const c = P(p);
       ctx.beginPath();
-      ctx.arc(px(p), py(p), 5, 0, Math.PI * 2);
+      ctx.arc(c.x, c.y, 5, 0, Math.PI * 2);
       ctx.fillStyle = '#ffffff';
       ctx.fill();
       ctx.strokeStyle = AVATAR_ACCENT;
       ctx.lineWidth = 2.2;
       ctx.stroke();
     }
+    return;
   }
+
+  const nose = P(points[0]);
+  const lSh = P(points[1]);
+  const rSh = P(points[2]);
+  const lEl = P(points[3]);
+  const rEl = P(points[4]);
+  const lWr = P(points[5]);
+  const rWr = P(points[6]);
+  const mid = { x: (lSh.x + rSh.x) / 2, y: (lSh.y + rSh.y) / 2 };
+  // Every proportion below is a multiple of shoulder width, so the figure
+  // keeps its build whoever was recorded and however close they stood.
+  let shoulderW = dist(lSh, rSh);
+  if (shoulderW < fit.scale * 0.05) shoulderW = fit.scale * 0.3;
+  const down = unit({ x: mid.x - nose.x, y: mid.y - nose.y }, { x: 0, y: 1 });
+  const side = unit({ x: lSh.x - rSh.x, y: lSh.y - rSh.y }, { x: 1, y: 0 });
+  const outlineW = shoulderW * 0.075;
+  const headR = shoulderW * 0.46;
+  const headC = step(nose, down, -headR * 0.22);
+
+  const line = (a: Vec, b: Vec, color: string, width: number) => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  };
+  const chain = (pts: Vec[], color: string, width: number) => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (const p of pts.slice(1)) ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+  };
+
+  // Neck first: torso and head both overlap it.
+  const neckW = shoulderW * 0.3;
+  line(headC, mid, OUTLINE, neckW + outlineW);
+  line(headC, mid, SKIN_SHADE, neckW);
+
+  // Torso: a rounded shirt from the shoulder line down to synthesized hips
+  // (the recording has no hip landmarks).
+  const torsoTop = step(mid, down, shoulderW * 0.02);
+  const hipMid = step(mid, down, shoulderW * 1.2);
+  const halfTop = shoulderW * 0.6;
+  const halfHip = shoulderW * 0.48;
+  const bulge = (sign: number) =>
+    step(step(torsoTop, down, shoulderW * 0.6), side, sign * halfTop * 1.05);
+  ctx.beginPath();
+  ctx.moveTo(step(torsoTop, side, halfTop).x, step(torsoTop, side, halfTop).y);
+  ctx.quadraticCurveTo(
+    bulge(1).x,
+    bulge(1).y,
+    step(hipMid, side, halfHip).x,
+    step(hipMid, side, halfHip).y,
+  );
+  ctx.quadraticCurveTo(
+    step(hipMid, down, shoulderW * 0.22).x,
+    step(hipMid, down, shoulderW * 0.22).y,
+    step(hipMid, side, -halfHip).x,
+    step(hipMid, side, -halfHip).y,
+  );
+  ctx.quadraticCurveTo(
+    bulge(-1).x,
+    bulge(-1).y,
+    step(torsoTop, side, -halfTop).x,
+    step(torsoTop, side, -halfTop).y,
+  );
+  ctx.quadraticCurveTo(
+    step(torsoTop, down, -shoulderW * 0.12).x,
+    step(torsoTop, down, -shoulderW * 0.12).y,
+    step(torsoTop, side, halfTop).x,
+    step(torsoTop, side, halfTop).y,
+  );
+  ctx.closePath();
+  ctx.fillStyle = AVATAR_ACCENT;
+  ctx.fill();
+  ctx.strokeStyle = OUTLINE;
+  ctx.lineWidth = outlineW;
+  ctx.stroke();
+
+  // Arms: sleeved upper arm, bare forearm, both driven by the recorded elbow
+  // and wrist points. Outlines go down first so one segment's fill never cuts
+  // into the next segment's outline.
+  const arms: Vec[][] = [
+    [lSh, lEl, lWr],
+    [rSh, rEl, rWr],
+  ];
+  const upperW = shoulderW * 0.3;
+  const foreW = shoulderW * 0.24;
+  for (const arm of arms) chain(arm, OUTLINE, upperW + outlineW);
+  for (const arm of arms) {
+    line(arm[0], arm[1], AVATAR_ACCENT, upperW);
+    line(arm[1], arm[2], SKIN, foreW);
+  }
+
+  // Head, hair and face, drawn in a frame rotated so +y follows `down` — the
+  // face stays upright when the recorded shoulders are tilted.
+  ctx.save();
+  ctx.translate(headC.x, headC.y);
+  ctx.rotate(Math.atan2(down.y, down.x) - Math.PI / 2);
+  ctx.beginPath();
+  ctx.arc(0, 0, headR, 0, Math.PI * 2);
+  ctx.fillStyle = SKIN;
+  ctx.fill();
+  ctx.save();
+  ctx.clip();
+  ctx.fillStyle = HAIR;
+  ctx.fillRect(-headR, -headR, headR * 2, headR * 0.7);
+  ctx.restore();
+  ctx.strokeStyle = OUTLINE;
+  ctx.lineWidth = outlineW;
+  ctx.beginPath();
+  ctx.arc(0, 0, headR, 0, Math.PI * 2);
+  ctx.stroke();
+  // The recording has one face point (the nose), so the expression is fixed
+  // rather than data-driven.
+  for (const dir of [-1, 1]) {
+    ctx.beginPath();
+    ctx.arc(dir * headR * 0.36, headR * 0.02, headR * 0.14, 0, Math.PI * 2);
+    ctx.fillStyle = OUTLINE;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(dir * headR * 0.36 + headR * 0.05, headR * 0.02 - headR * 0.05, headR * 0.05, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(dir * headR * 0.58, headR * 0.32, headR * 0.13, 0, Math.PI * 2);
+    ctx.fillStyle = BLUSH;
+    ctx.fill();
+  }
+  ctx.beginPath();
+  ctx.ellipse(0, headR * 0.28, headR * 0.31, headR * 0.23, 0, 0.15 * Math.PI, 0.85 * Math.PI);
+  ctx.strokeStyle = OUTLINE;
+  ctx.lineWidth = outlineW * 0.85;
+  ctx.stroke();
+  ctx.restore();
+
+  // Hands last: signing happens in front of the body.
+  const hands = handsForFrame(frames, index);
+  const fingerW = shoulderW * 0.105;
+  // A hand is a lot of parallel strokes in a small area, so it gets a thinner
+  // outline than the body — at the body's weight, curled fingers fill in solid
+  // black.
+  const handOutlineW = outlineW * 0.5;
+  [lWr, rWr].forEach((wrist, slot) => {
+    const hand = hands[slot];
+    if (hand === null || hand.length < HAND_POINTS) {
+      // No hand data anywhere in the clip for this wrist: a plain mitten keeps
+      // the arm from ending in a stump.
+      ctx.beginPath();
+      ctx.arc(wrist.x, wrist.y, shoulderW * 0.19, 0, Math.PI * 2);
+      ctx.fillStyle = SKIN;
+      ctx.fill();
+      ctx.strokeStyle = OUTLINE;
+      ctx.lineWidth = outlineW;
+      ctx.stroke();
+      return;
+    }
+    const p = hand.map(P);
+    const palm = () => {
+      ctx.beginPath();
+      ctx.moveTo(p[PALM_OUTLINE[0]].x, p[PALM_OUTLINE[0]].y);
+      for (const i of PALM_OUTLINE.slice(1)) ctx.lineTo(p[i].x, p[i].y);
+      ctx.closePath();
+    };
+    // Palm first, so the finger outlines land on top of it.
+    palm();
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = fingerW + handOutlineW * 2;
+    ctx.stroke();
+    ctx.fillStyle = SKIN;
+    ctx.fill();
+    palm();
+    ctx.lineWidth = handOutlineW;
+    ctx.stroke();
+    // One finger at a time — outline then fill. Drawing every outline first
+    // lets the next finger's fill erase the line between them, which is what
+    // turned a spread hand into a mitten. Farthest finger first (landmark z is
+    // depth relative to the wrist, negative = toward the camera) so overlaps
+    // stack the way the real hand did.
+    const meanZ = (finger: number[]) =>
+      finger.reduce((sum, i) => sum + hand[i].z, 0) / finger.length;
+    for (const finger of [...FINGER_CHAINS].sort((a, b) => meanZ(b) - meanZ(a))) {
+      const pts = finger.map((i) => p[i]);
+      chain(pts, OUTLINE, fingerW + handOutlineW * 2);
+      chain(pts, SKIN, fingerW);
+    }
+  });
 }
 
 // AvatarPreview loops the recorded keypoint frames on a canvas at ~the app's
@@ -1078,7 +1361,7 @@ function AvatarPreview({ frames, size = 220 }: { frames: KeypointFrame[][]; size
     if (!ctx || frames.length === 0) return;
     const paintAt = (t: number) => {
       const idx = Math.min(Math.floor(t * frames.length), frames.length - 1);
-      renderAvatarFrame(ctx, frames[idx], size);
+      renderAvatarFrame(ctx, frames, idx, size);
     };
     // Paint frame 0 synchronously: requestAnimationFrame is paused while the
     // tab is hidden, so relying on it alone can leave the canvas blank.

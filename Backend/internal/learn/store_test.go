@@ -55,8 +55,8 @@ func TestSeedIdempotent(t *testing.T) {
 	for _, words := range dictionaryCategories {
 		wantSigns += len(words)
 	}
-	if wantSigns != 150 {
-		t.Errorf("dictionary seed covers %d words, want the 150-word vocabulary", wantSigns)
+	if wantSigns != 220 {
+		t.Errorf("dictionary seed covers %d words, want 220 words", wantSigns)
 	}
 	if len(signs) != wantSigns {
 		t.Fatalf("seeded %d signs, want %d", len(signs), wantSigns)

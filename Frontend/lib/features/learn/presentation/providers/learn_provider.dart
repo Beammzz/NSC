@@ -1,6 +1,20 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:signmind/features/learn/data/repositories/learn_repository.dart';
 import 'package:signmind/features/learn/domain/models/learn_models.dart';
+import 'package:signmind/features/learn/presentation/widgets/sign_avatar.dart';
+
+/// How the dictionary avatar is drawn. In memory for the session — the user
+/// switches it from the sign sheet; it is not a persisted setting.
+class SignAvatarStyleNotifier extends Notifier<SignAvatarStyle> {
+  @override
+  SignAvatarStyle build() => SignAvatarStyle.cartoon;
+
+  void setStyle(SignAvatarStyle style) => state = style;
+}
+
+final signAvatarStyleProvider =
+    NotifierProvider<SignAvatarStyleNotifier, SignAvatarStyle>(
+        SignAvatarStyleNotifier.new);
 
 /// Published roadmap topics with their exercises.
 final learnTopicsProvider = FutureProvider<List<LearnTopic>>((ref) {

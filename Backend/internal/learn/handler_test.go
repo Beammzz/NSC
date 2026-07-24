@@ -178,8 +178,8 @@ func TestTopicsAndDictionary(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&dictBody); err != nil {
 		t.Fatalf("decoding dictionary: %v", err)
 	}
-	if len(dictBody.Signs) != 150 {
-		t.Errorf("signs = %d, want 150", len(dictBody.Signs))
+	if len(dictBody.Signs) != 220 {
+		t.Errorf("signs = %d, want 220", len(dictBody.Signs))
 	}
 
 	// Thai word in the path segment.
