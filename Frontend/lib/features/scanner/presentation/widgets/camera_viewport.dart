@@ -34,6 +34,22 @@ class CameraViewport extends ConsumerStatefulWidget {
 
 class _CameraViewportState extends ConsumerState<CameraViewport> {
   @override
+  void initState() {
+    super.initState();
+    // Nothing used to call `configure`, so every ScannerTuning knob sat at its
+    // Kotlin default — including the resolution the native ImageAnalysis binds
+    // at, which decides how many pixels the pipeline copies and rotates per
+    // frame. Push it (and any later change) into the native session here.
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      ref.listenManual(
+        settingsProvider.select((s) => s.cameraResolution),
+        (_, resolution) => _applyNativeTuning(resolution),
+        fireImmediately: true,
+      );
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final state = widget.state;
     final cameraAsync = ref.watch(cameraControllerProvider);
@@ -206,6 +222,17 @@ class _CameraViewportState extends ConsumerState<CameraViewport> {
         'facing': lens == CameraLensDirection.back ? 'back' : 'front',
       }).catchError((Object _) {});
     }
+  }
+
+  /// Pushes the Dart-owned scanner settings into native `ScannerTuning`.
+  ///
+  /// Only the keys this side owns are sent: a `configure` payload missing a key
+  /// leaves that field unchanged, so the cadence knobs the native engine ships
+  /// with (pose interval, hand probe, delegates) keep their tuned values.
+  void _applyNativeTuning(String resolution) {
+    _cameraControlChannel.invokeMethod<void>('configure', {
+      'cameraResolution': resolution,
+    }).catchError((Object _) {});
   }
 
   /// Renders the live camera feed, cover-fitted into the viewport. Returns an

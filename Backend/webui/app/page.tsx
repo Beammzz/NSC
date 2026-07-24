@@ -1,19 +1,13 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { fetchStatus, putTuning, Status, Tuning } from '../lib/api';
+import { fetchStatus, Status, Tuning } from '../lib/api';
 
 export default function DashboardPage() {
   const [status, setStatus] = useState<Status | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-
-  // Tuning form state
-  const [confThreshold, setConfThreshold] = useState<string>('');
-  const [idleFrames, setIdleFrames] = useState<string>('');
-  const [idleMotionStd, setIdleMotionStd] = useState<string>('');
-  const [savingTuning, setSavingTuning] = useState<boolean>(false);
-  const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   async function loadStatus(showSpinner = false) {
     if (showSpinner) setLoading(true);
@@ -21,12 +15,6 @@ export default function DashboardPage() {
       const res = await fetchStatus();
       setStatus(res);
       setError(null);
-      // Initialize form fields only when they are empty
-      if (res.tuning && confThreshold === '') {
-        setConfThreshold(String(res.tuning.confidence_threshold));
-        setIdleFrames(String(res.tuning.idle_min_frames_with_hands));
-        setIdleMotionStd(String(res.tuning.idle_motion_std_threshold));
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -40,37 +28,12 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, []);
 
-  async function handleSaveTuning(e: React.FormEvent) {
-    e.preventDefault();
-    setSavingTuning(true);
-    setNotice(null);
-    try {
-      const c = parseFloat(confThreshold);
-      const f = parseInt(idleFrames, 10);
-      const m = parseFloat(idleMotionStd);
-
-      const updated = await putTuning({
-        confidence_threshold: isNaN(c) ? undefined : c,
-        idle_min_frames_with_hands: isNaN(f) ? undefined : f,
-        idle_motion_std_threshold: isNaN(m) ? undefined : m,
-      });
-
-      setStatus((prev) => (prev ? { ...prev, tuning: updated } : prev));
-      setNotice({ type: 'success', text: 'Runtime tuning parameters updated successfully.' });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setNotice({ type: 'error', text: `Failed to update tuning: ${msg}` });
-    } finally {
-      setSavingTuning(false);
-    }
-  }
-
   const t: Tuning | undefined = status?.tuning;
 
   return (
     <div>
       <h1>Dashboard</h1>
-      <p className="subtitle">Real-time gateway status and runtime inference configuration</p>
+      <p className="subtitle">Real-time gateway status and runtime inference environment</p>
 
       {error && (
         <div className="notice error">
@@ -119,7 +82,12 @@ export default function DashboardPage() {
 
           <div className="grid">
             <div className="card">
-              <h2>Active Model Overview</h2>
+              <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <h2 style={{ margin: 0 }}>Active Model Overview</h2>
+                <Link href="/tsl-model/?tab=tuning" className="secondary" style={{ fontSize: '12px', padding: '4px 10px' }}>
+                  Configure Tuning &rarr;
+                </Link>
+              </div>
               {t ? (
                 <dl className="kv">
                   <dt>Model Loaded</dt>
@@ -144,64 +112,10 @@ export default function DashboardPage() {
                 </div>
               )}
             </div>
-
-            <div className="card">
-              <h2>Runtime Tuning Parameters</h2>
-              {t ? (
-                <form onSubmit={handleSaveTuning}>
-                  <label className="field">
-                    <span>Confidence Threshold</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="1"
-                      value={confThreshold}
-                      onChange={(e) => setConfThreshold(e.target.value)}
-                    />
-                  </label>
-
-                  <label className="field">
-                    <span>Idle Min Frames With Hands</span>
-                    <input
-                      type="number"
-                      step="1"
-                      min="0"
-                      value={idleFrames}
-                      onChange={(e) => setIdleFrames(e.target.value)}
-                    />
-                  </label>
-
-                  <label className="field">
-                    <span>Idle Motion Std Threshold</span>
-                    <input
-                      type="number"
-                      step="0.0001"
-                      min="0"
-                      value={idleMotionStd}
-                      onChange={(e) => setIdleMotionStd(e.target.value)}
-                    />
-                  </label>
-
-                  {notice && (
-                    <div className={`notice ${notice.type}`} style={{ margin: '8px 0' }}>
-                      {notice.text}
-                    </div>
-                  )}
-
-                  <button type="submit" disabled={savingTuning}>
-                    {savingTuning ? 'Saving...' : 'Apply Tuning'}
-                  </button>
-                </form>
-              ) : (
-                <div className="empty" style={{ padding: '8px' }}>
-                  Cannot configure tuning while AI service is offline
-                </div>
-              )}
-            </div>
           </div>
         </>
       )}
     </div>
   );
 }
+

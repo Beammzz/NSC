@@ -53,7 +53,12 @@ class AppSettings {
       autoSpeak: true,
       hapticFeedback: true,
       confidenceThreshold: 0.85,
-      cameraResolution: '720p',
+      // 480p, not 720p: CameraX's legacy setTargetResolution matches by aspect
+      // ratio first, and on devices whose camera only exposes square output
+      // sizes (Galaxy S25 FE front) a 1280x720 target skips 1088x1088 for
+      // being too narrow and binds 2992x2992 — 9.7x the pixels, ~80ms/frame
+      // just copying and rotating them. A 854x480 target fits 1088x1088.
+      cameraResolution: '480p',
       showDebugOverlay: false,
       // Production server default.
       serverUrl: 'https://signmind.harumi.dev',

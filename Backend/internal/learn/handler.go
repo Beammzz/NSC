@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -38,6 +41,7 @@ import (
 //	GET    /api/v1/admin/learn/signs               all dictionary entries (no frames)
 //	POST   /api/v1/admin/learn/signs               upsert a sign (word + category)
 //	POST   /api/v1/admin/learn/signs/{word}/recording  extract keypoints from an uploaded clip
+//	POST   /api/v1/admin/learn/signs/import-thsl   import sign from th-sl.com link
 //	DELETE /api/v1/admin/learn/signs/{word}        delete a sign
 const (
 	// Multipart parse memory threshold for a sign recording; larger spools to disk.
@@ -91,6 +95,7 @@ func (h *Handler) RegisterProtected(mux *http.ServeMux, userMW, adminMW func(htt
 	mux.Handle("GET /api/v1/admin/learn/signs", admin(h.adminSigns))
 	mux.Handle("POST /api/v1/admin/learn/signs", admin(h.upsertSign))
 	mux.Handle("POST /api/v1/admin/learn/signs/{word}/recording", admin(h.uploadSignRecording))
+	mux.Handle("POST /api/v1/admin/learn/signs/import-thsl", admin(h.importFromThsl))
 	mux.Handle("DELETE /api/v1/admin/learn/signs/{word}", admin(h.deleteSign))
 }
 
@@ -370,6 +375,216 @@ func (h *Handler) deleteSign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+var (
+	reThslShortcodeWord = regexp.MustCompile(`(?i)<div class="elementor-shortcode">([^<]+)</div>`)
+	reThslOgTitle       = regexp.MustCompile(`(?i)<meta property="og:title" content="([^"]+)"`)
+	reThslTitle         = regexp.MustCompile(`(?i)<title>([^<]+)</title>`)
+
+	reThslVideoTag     = regexp.MustCompile(`(?i)<video[^>]*src=["']([^"']+)["']`)
+	reThslSourceTag    = regexp.MustCompile(`(?i)<source[^>]*src=["']([^"']+)["']`)
+	reThslOgVideo      = regexp.MustCompile(`(?i)<meta property="og:video"[^>]*content=["']([^"']+)["']`)
+	reThslOgImageMedia = regexp.MustCompile(`(?i)<meta property="og:image"[^>]*content=["']([^"']+\.(?:mp4|webm|gif))["']`)
+)
+
+func extractWordFromThslHTML(html string) string {
+	raw := ""
+	if m := reThslShortcodeWord.FindStringSubmatch(html); len(m) > 1 {
+		raw = m[1]
+	} else if m := reThslOgTitle.FindStringSubmatch(html); len(m) > 1 {
+		raw = m[1]
+	} else if m := reThslTitle.FindStringSubmatch(html); len(m) > 1 {
+		raw = m[1]
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+
+	// Strip " - ฐานข้อมูลภาษามือไทย..." suffix
+	if idx := strings.Index(raw, " - "); idx != -1 {
+		raw = raw[:idx]
+	}
+	// Strip "(ท่ามือที่...)"
+	if idx := strings.Index(raw, "("); idx != -1 {
+		raw = raw[:idx]
+	}
+	return strings.TrimSpace(raw)
+}
+
+func extractVideoURLFromThslHTML(html, pageURL string) string {
+	rawURL := ""
+	if m := reThslVideoTag.FindStringSubmatch(html); len(m) > 1 {
+		rawURL = m[1]
+	} else if m := reThslSourceTag.FindStringSubmatch(html); len(m) > 1 {
+		rawURL = m[1]
+	} else if m := reThslOgVideo.FindStringSubmatch(html); len(m) > 1 {
+		rawURL = m[1]
+	} else if m := reThslOgImageMedia.FindStringSubmatch(html); len(m) > 1 {
+		rawURL = m[1]
+	}
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return ""
+	}
+
+	// Normalize double slashes in host/path like https://www.th-sl.com//wp-content/...
+	if strings.HasPrefix(rawURL, "https://") {
+		rawURL = "https://" + strings.ReplaceAll(rawURL[8:], "//", "/")
+	} else if strings.HasPrefix(rawURL, "http://") {
+		rawURL = "http://" + strings.ReplaceAll(rawURL[7:], "//", "/")
+	} else if strings.HasPrefix(rawURL, "//") {
+		rawURL = "https:" + strings.ReplaceAll(rawURL, "//", "/")
+	} else if strings.HasPrefix(rawURL, "/") {
+		base, err := url.Parse(pageURL)
+		if err == nil {
+			rawURL = base.Scheme + "://" + base.Host + rawURL
+		}
+	}
+	return rawURL
+}
+
+func (h *Handler) importFromThsl(w http.ResponseWriter, r *http.Request) {
+	if !h.extractor.Configured() {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusServiceUnavailable, "Recording unavailable",
+			"keypoint extraction is not configured on this server"))
+		return
+	}
+
+	var body struct {
+		URL      string `json:"url"`
+		Word     string `json:"word"`
+		Category string `json:"category"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusBadRequest, "Malformed import body", err.Error()))
+		return
+	}
+
+	pageURL := strings.TrimSpace(body.URL)
+	if pageURL == "" {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusBadRequest, "Invalid import URL", "url is required"))
+		return
+	}
+	if !strings.HasPrefix(pageURL, "http://") && !strings.HasPrefix(pageURL, "https://") {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusBadRequest, "Invalid import URL", "url must start with http:// or https://"))
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), recordingTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", pageURL, nil)
+	if err != nil {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusBadRequest, "Failed to create request for URL", err.Error()))
+		return
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusBadGateway, "Failed to fetch th-sl page", err.Error()))
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusBadGateway, "th-sl page returned error status", fmt.Sprintf("HTTP %d", resp.StatusCode)))
+		return
+	}
+
+	htmlBytes, err := io.ReadAll(io.LimitReader(resp.Body, 5<<20))
+	if err != nil {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusInternalServerError, "Failed to read th-sl HTML", err.Error()))
+		return
+	}
+	html := string(htmlBytes)
+
+	word := strings.TrimSpace(body.Word)
+	if word == "" {
+		word = extractWordFromThslHTML(html)
+	}
+	if word == "" {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusBadRequest, "Could not extract word from URL", "Please specify the word manually"))
+		return
+	}
+
+	category := strings.TrimSpace(body.Category)
+	if category == "" {
+		category = "imported"
+	}
+
+	videoURL := extractVideoURLFromThslHTML(html, pageURL)
+	if videoURL == "" {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusUnprocessableEntity, "No sign video found", "Could not find video media on th-sl page"))
+		return
+	}
+
+	vReq, err := http.NewRequestWithContext(ctx, "GET", videoURL, nil)
+	if err != nil {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusInternalServerError, "Failed to build video request", err.Error()))
+		return
+	}
+	vReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+
+	vResp, err := http.DefaultClient.Do(vReq)
+	if err != nil {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusBadGateway, "Failed to download sign video", err.Error()))
+		return
+	}
+	defer vResp.Body.Close()
+
+	if vResp.StatusCode != http.StatusOK {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusBadGateway, "Video URL returned error status", fmt.Sprintf("HTTP %d", vResp.StatusCode)))
+		return
+	}
+
+	ext := filepath.Ext(videoURL)
+	if pos := strings.Index(ext, "?"); pos != -1 {
+		ext = ext[:pos]
+	}
+	if ext == "" {
+		ext = ".mp4"
+	}
+
+	frames, err := h.extractor.ExtractReader(ctx, io.LimitReader(vResp.Body, maxRecordingBytes), ext)
+	if err != nil {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusUnprocessableEntity, "Keypoint extraction failed", err.Error()))
+		return
+	}
+
+	if err := h.store.UpsertSign(word, category); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+
+	if err := h.store.SetKeypointFrames(word, frames); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+
+	writeJSON(w, map[string]any{
+		"word":          word,
+		"category":      category,
+		"has_animation": true,
+		"source_url":    pageURL,
+		"video_url":     videoURL,
+	})
 }
 
 // ---- helpers ----

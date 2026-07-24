@@ -16,6 +16,8 @@ import logging
 import os
 import queue
 import shutil
+import signal
+import threading
 from concurrent import futures
 from datetime import datetime, timezone
 
@@ -325,7 +327,29 @@ def main() -> None:
     server, port = build_server(engine, broadcaster, addr)
     server.start()
     logger.info("TslInference gRPC server listening on %s (port %d)", addr, port)
-    server.wait_for_termination()
+
+    stop_event = threading.Event()
+
+    def _shutdown(signum=None, frame=None):
+        logger.info("Shutdown signal (%s) received", signum)
+        stop_event.set()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(sig, _shutdown)
+        except (ValueError, OSError):
+            pass
+
+    try:
+        while not stop_event.is_set():
+            stop_event.wait(timeout=1.0)
+    except KeyboardInterrupt:
+        logger.info("KeyboardInterrupt received")
+
+    logger.info("Shutting down TslInference gRPC server...")
+    shutdown_event = server.stop(grace=5)
+    shutdown_event.wait()
+    logger.info("TslInference gRPC server stopped cleanly.")
 
 
 if __name__ == "__main__":

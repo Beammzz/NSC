@@ -205,11 +205,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             items: const [
                               DropdownMenuItem(
                                 value: '480p',
-                                child: Text('480p SD'),
+                                child: Text('480p (แนะนำ)'),
                               ),
                               DropdownMenuItem(
                                 value: '720p',
-                                child: Text('720p (แนะนำ)'),
+                                child: Text('720p HD'),
                               ),
                               DropdownMenuItem(
                                 value: '1080p',
@@ -692,24 +692,30 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                children: [
-                  const Icon(
-                    Icons.system_update_outlined,
-                    color: AppTheme.primaryAccent,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'อัปเดตแอปพลิเคชัน (Shorebird OTA)',
-                    style: TextStyle(
-                      color: context.textColor,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
+              Expanded(
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.system_update_outlined,
+                      color: AppTheme.primaryAccent,
+                      size: 20,
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        'อัปเดตแอปพลิเคชัน (Shorebird OTA)',
+                        style: TextStyle(
+                          color: context.textColor,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
               ),
+              const SizedBox(width: 8),
               if (otaState.status == OtaStatus.checking)
                 const SizedBox(
                   width: 16,

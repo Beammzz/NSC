@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:signmind/features/settings/domain/models/settings_models.dart';
 import 'package:signmind/features/settings/presentation/providers/ota_update_provider.dart';
 import 'package:signmind/features/settings/presentation/providers/settings_provider.dart';
 import 'package:signmind/features/settings/presentation/screens/settings_screen.dart';
@@ -168,6 +169,25 @@ void main() {
     await tester.tap(restartBtn);
     await tester.pumpAndSettle();
     expect(fakeService.restartCalled, isTrue);
+  });
+
+  // Regression guard for the 2026-07-24 S25 FE fps bug (docs/STATE.md). This
+  // default is what camera_viewport.dart sends over the `configure` channel,
+  // and it is load-bearing: CameraX's setTargetResolution matches by aspect
+  // ratio first, so on a camera that only exposes square output sizes a 720p
+  // target skips 1088x1088 and binds 2992x2992 — 9.7x the pixels, ~80ms/frame
+  // of bitmap copy+rotate, 5fps. 480p keeps the bind at 1088x1088.
+  test('default cameraResolution is 480p', () {
+    expect(AppSettings.initial().cameraResolution, '480p');
+  });
+
+  test('settings load falls back to the 480p default when none is persisted',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final container = await makeContainer();
+    addTearDown(container.dispose);
+
+    expect(container.read(settingsProvider).cameraResolution, '480p');
   });
 }
 

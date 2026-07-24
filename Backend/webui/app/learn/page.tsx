@@ -10,6 +10,7 @@ import {
   createLearnExercise,
   updateLearnExercise,
   deleteLearnExercise,
+  isIdleWord,
   LearnTopic,
   LearnExercise,
   LearnSign,
@@ -54,7 +55,7 @@ export default function LearnPage() {
     try {
       const [t, s] = await Promise.all([fetchLearnTopics(), fetchLearnSigns()]);
       setTopics(t);
-      setSigns(s);
+      setSigns(s.filter((sign) => !isIdleWord(sign.word)));
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

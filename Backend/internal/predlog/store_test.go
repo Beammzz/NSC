@@ -133,3 +133,49 @@ func TestClear(t *testing.T) {
 		t.Fatalf("expected count 0 after clear, got %d", n)
 	}
 }
+
+func TestAutoCleanAndPrune(t *testing.T) {
+	store := openTemp(t)
+
+	// Verify default is 0 (disabled)
+	max, err := store.GetAutoCleanMax()
+	if err != nil || max != 0 {
+		t.Fatalf("expected initial max 0, got max=%d err=%v", max, err)
+	}
+
+	// Insert 10 records
+	for i := 0; i < 10; i++ {
+		if err := store.Insert(Record{Seq: uint64(i), Word: "test"}); err != nil {
+			t.Fatalf("Insert %d: %v", i, err)
+		}
+	}
+	count, _ := store.Count()
+	if count != 10 {
+		t.Fatalf("expected 10 records, got %d", count)
+	}
+
+	// Set limit to 5 -> should prune 5 oldest records immediately
+	if err := store.SetAutoCleanMax(5); err != nil {
+		t.Fatalf("SetAutoCleanMax(5): %v", err)
+	}
+	count, _ = store.Count()
+	if count != 5 {
+		t.Fatalf("expected 5 records after setting limit to 5, got %d", count)
+	}
+
+	// Inserting another record should keep count at 5
+	if err := store.Insert(Record{Seq: 100, Word: "new"}); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	count, _ = store.Count()
+	if count != 5 {
+		t.Fatalf("expected count to remain 5 after new insert, got %d", count)
+	}
+
+	// Verify the newest record is present
+	list, _ := store.List(QueryOptions{})
+	if len(list) == 0 || list[0].Word != "new" {
+		t.Fatalf("expected newest record to be 'new', got %+v", list)
+	}
+}
+

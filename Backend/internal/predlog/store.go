@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	_ "modernc.org/sqlite" // database/sql driver "sqlite"
@@ -28,6 +29,11 @@ CREATE TABLE IF NOT EXISTS predictions (
 );
 CREATE INDEX IF NOT EXISTS idx_predictions_created ON predictions(created_ms);
 CREATE INDEX IF NOT EXISTS idx_predictions_word ON predictions(word);
+
+CREATE TABLE IF NOT EXISTS predlog_settings (
+	key   TEXT PRIMARY KEY,
+	value TEXT NOT NULL
+);
 `
 
 // ClassProb mirrors the proto ClassProb for storage/JSON.
@@ -127,7 +133,63 @@ func (s *Store) Insert(r Record) error {
 	if err != nil {
 		return fmt.Errorf("inserting prediction: %w", err)
 	}
+	if max, err := s.GetAutoCleanMax(); err == nil && max > 0 {
+		_, _ = s.Prune(max)
+	}
 	return nil
+}
+
+const autoCleanMaxKey = "auto_clean_max_predictions"
+
+// GetAutoCleanMax retrieves the auto clean predictions limit setting (0 = disabled).
+func (s *Store) GetAutoCleanMax() (int64, error) {
+	var valStr string
+	err := s.db.QueryRow(`SELECT value FROM predlog_settings WHERE key = ?`, autoCleanMaxKey).Scan(&valStr)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("reading auto_clean_max_predictions setting: %w", err)
+	}
+	v, err := strconv.ParseInt(valStr, 10, 64)
+	if err != nil {
+		return 0, nil
+	}
+	return v, nil
+}
+
+// SetAutoCleanMax updates the auto clean predictions limit setting and immediately prunes if > 0.
+func (s *Store) SetAutoCleanMax(max int64) error {
+	if max < 0 {
+		max = 0
+	}
+	_, err := s.db.Exec(`INSERT INTO predlog_settings (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, autoCleanMaxKey, strconv.FormatInt(max, 10))
+	if err != nil {
+		return fmt.Errorf("saving auto_clean_max_predictions setting: %w", err)
+	}
+	if max > 0 {
+		if _, err := s.Prune(max); err != nil {
+			return fmt.Errorf("pruning predictions after setting limit: %w", err)
+		}
+	}
+	return nil
+}
+
+// Prune retains only the newest maxRecords predictions in the database.
+func (s *Store) Prune(maxRecords int64) (int64, error) {
+	if maxRecords <= 0 {
+		return 0, nil
+	}
+	res, err := s.db.Exec(
+		`DELETE FROM predictions WHERE id NOT IN (
+			SELECT id FROM predictions ORDER BY id DESC LIMIT ?
+		)`, maxRecords)
+	if err != nil {
+		return 0, fmt.Errorf("pruning old predictions: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
 }
 
 // List returns matching records, newest first.

@@ -7,6 +7,9 @@ import {
   createSign,
   deleteSign,
   uploadSignRecording,
+  importSignFromThsl,
+  reindexDictionaryFromLabelMap,
+  isIdleWord,
   LearnSign,
   KeypointFrame,
 } from '../../lib/api';
@@ -22,9 +25,19 @@ export default function DictionaryPage() {
   const [newCategory, setNewCategory] = useState('');
   const [savingSign, setSavingSign] = useState(false);
 
+  // Import-thsl form.
+  const [importUrl, setImportUrl] = useState('');
+  const [importWord, setImportWord] = useState('');
+  const [importCategory, setImportCategory] = useState('');
+  const [importing, setImporting] = useState(false);
+
+  // Reindex dictionary state
+  const [reindexing, setReindexing] = useState(false);
+
   // The word currently being recorded/uploaded for (null = recorder closed).
   const [recorderModal, setRecorderModal] = useState<{ word: string; initialFile?: File } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const jsonFileInputRef = useRef<HTMLInputElement>(null);
   const [uploadTargetWord, setUploadTargetWord] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
@@ -36,7 +49,9 @@ export default function DictionaryPage() {
   async function load() {
     try {
       const s = await fetchAdminSigns();
-      setSigns(s);
+      // Filter out idle gesture "ไม่ทำอะไรเลย" / "ไม่ทำไรเลย" so it never counts as a dictionary word
+      const validSigns = s.filter((item) => !isIdleWord(item.word));
+      setSigns(validSigns);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -54,13 +69,63 @@ export default function DictionaryPage() {
     setNotice({ type: 'error', text: `${prefix}: ${msg}` });
   }
 
+  async function handleReindexDefault() {
+    setReindexing(true);
+    setNotice(null);
+    try {
+      const res = await reindexDictionaryFromLabelMap();
+      setNotice({
+        type: 'success',
+        text: `Dictionary reindexed with label_map: ${res.added} new words added (${res.total} total valid words, excluding idle gesture "ไม่ทำอะไรเลย").`,
+      });
+      await load();
+    } catch (err) {
+      fail('Failed to reindex dictionary', err);
+    } finally {
+      setReindexing(false);
+    }
+  }
+
+  async function handleCustomJsonReindex(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setReindexing(true);
+    setNotice(null);
+    try {
+      const text = await file.text();
+      const rawMap = JSON.parse(text) as Record<string, number | string>;
+      const customMap: Record<string, string> = {};
+      for (const key of Object.keys(rawMap)) {
+        if (!isIdleWord(key)) {
+          customMap[key.trim()] = 'ทั่วไป';
+        }
+      }
+      const res = await reindexDictionaryFromLabelMap(customMap);
+      setNotice({
+        type: 'success',
+        text: `Custom label_map reindexed: ${res.added} new words added (${res.total} total valid words indexed, idle gesture excluded).`,
+      });
+      await load();
+    } catch (err) {
+      fail('Failed to reindex from uploaded JSON', err);
+    } finally {
+      setReindexing(false);
+      if (jsonFileInputRef.current) jsonFileInputRef.current.value = '';
+    }
+  }
+
   async function handleCreateSign(e: FormEvent) {
     e.preventDefault();
+    const word = newWord.trim();
+    if (isIdleWord(word)) {
+      setNotice({ type: 'error', text: '"ไม่ทำอะไรเลย" / Idle gesture cannot be added as a dictionary word.' });
+      return;
+    }
     setSavingSign(true);
     setNotice(null);
     try {
-      await createSign(newWord.trim(), newCategory.trim());
-      setNotice({ type: 'success', text: `Sign "${newWord.trim()}" saved.` });
+      await createSign(word, newCategory.trim());
+      setNotice({ type: 'success', text: `Sign "${word}" saved.` });
       setNewWord('');
       setNewCategory('');
       await load();
@@ -68,6 +133,24 @@ export default function DictionaryPage() {
       fail('Failed to save sign', err);
     } finally {
       setSavingSign(false);
+    }
+  }
+
+  async function handleImportThsl(e: FormEvent) {
+    e.preventDefault();
+    setImporting(true);
+    setNotice(null);
+    try {
+      const res = await importSignFromThsl(importUrl.trim(), importWord.trim(), importCategory.trim());
+      setNotice({ type: 'success', text: `Imported sign "${res.word}" from th-sl.com.` });
+      setImportUrl('');
+      setImportWord('');
+      setImportCategory('');
+      await load();
+    } catch (err) {
+      fail('Failed to import from th-sl.com', err);
+    } finally {
+      setImporting(false);
     }
   }
 
@@ -116,54 +199,119 @@ export default function DictionaryPage() {
     <div>
       <h1>Dictionary</h1>
       <p className="subtitle">
-        Build the recorded sign library: create a word, record it in-browser, and the backend extracts
-        the keypoint frames the avatar plays back in the dictionary
+        Build the recorded sign library: reindex label map, import from th-sl.com, record in-browser, or upload video files.
       </p>
 
       {notice && <div className={`notice ${notice.type}`}>{notice.text}</div>}
       {error && <div className="notice error">Failed to load signs: {error}</div>}
 
-      <div className="card" style={{ marginBottom: 20, maxWidth: 620 }}>
-        <h2>New sign</h2>
-        <form onSubmit={handleCreateSign}>
-          <label className="field">
-            <span>Word (shown in the app)</span>
-            <input
-              value={newWord}
-              onChange={(e) => setNewWord(e.target.value)}
-              placeholder="สวัสดี"
-              required
-            />
-          </label>
-          <label className="field">
-            <span>Category</span>
-            <input
-              value={newCategory}
-              onChange={(e) => setNewCategory(e.target.value)}
-              placeholder="greetings"
-            />
-          </label>
-          <button type="submit" disabled={savingSign || newWord.trim() === ''}>
-            {savingSign ? 'Saving...' : 'Save sign'}
+      {/* Reindex Card */}
+      <div className="card" style={{ marginBottom: 20 }}>
+        <h2>Reindex Vocabulary from Label Map (220-class map)</h2>
+        <p className="subtitle" style={{ marginTop: 0 }}>
+          Automatically index all 219 dictionary words from <code>label_map (1).json</code> into the dictionary database.
+          Idle gesture <code>ไม่ทำอะไรเลย</code> (Class 217) is automatically excluded from word counts.
+        </p>
+        <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
+          <button type="button" onClick={handleReindexDefault} disabled={reindexing}>
+            {reindexing ? 'Reindexing Vocabulary...' : '⚡ Reindex 219 Words from label_map (1).json'}
           </button>
-        </form>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => jsonFileInputRef.current?.click()}
+            disabled={reindexing}
+          >
+            Upload Custom label_map.json
+          </button>
+          <input
+            type="file"
+            ref={jsonFileInputRef}
+            accept=".json"
+            style={{ display: 'none' }}
+            onChange={handleCustomJsonReindex}
+          />
+        </div>
       </div>
 
+      <div className="row" style={{ gap: 20, marginBottom: 20, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+        <div className="card" style={{ flex: '1 1 300px', maxWidth: 620, margin: 0 }}>
+          <h2>Import from th-sl.com</h2>
+          <form onSubmit={handleImportThsl}>
+            <label className="field">
+              <span>th-sl.com Link</span>
+              <input
+                type="url"
+                value={importUrl}
+                onChange={(e) => setImportUrl(e.target.value)}
+                placeholder="https://www.th-sl.com/75993/"
+                required
+              />
+            </label>
+            <label className="field">
+              <span>Word (optional - auto-detected if blank)</span>
+              <input
+                value={importWord}
+                onChange={(e) => setImportWord(e.target.value)}
+                placeholder="e.g. ว่าไง"
+              />
+            </label>
+            <label className="field">
+              <span>Category (optional)</span>
+              <input
+                value={importCategory}
+                onChange={(e) => setImportCategory(e.target.value)}
+                placeholder="e.g. greetings"
+              />
+            </label>
+            <button type="submit" disabled={importing || importUrl.trim() === ''}>
+              {importing ? 'Importing & Extracting...' : 'Import Sign from th-sl.com'}
+            </button>
+          </form>
+        </div>
 
+        <div className="card" style={{ flex: '1 1 300px', maxWidth: 620, margin: 0 }}>
+          <h2>New sign (Manual)</h2>
+          <form onSubmit={handleCreateSign}>
+            <label className="field">
+              <span>Word (shown in the app)</span>
+              <input
+                value={newWord}
+                onChange={(e) => setNewWord(e.target.value)}
+                placeholder="สวัสดี"
+                required
+              />
+            </label>
+            <label className="field">
+              <span>Category</span>
+              <input
+                value={newCategory}
+                onChange={(e) => setNewCategory(e.target.value)}
+                placeholder="greetings"
+              />
+            </label>
+            <button type="submit" disabled={savingSign || newWord.trim() === ''}>
+              {savingSign ? 'Saving...' : 'Save sign'}
+            </button>
+          </form>
+        </div>
+      </div>
 
-
-
-      <div className="row" style={{ marginBottom: 12 }}>
+      <div className="row" style={{ marginBottom: 12, gap: 8, alignItems: 'center' }}>
         <span className="chip info">
           <span className="dot" />
           {signs.length} sign{signs.length !== 1 ? 's' : ''} · {withAnimation} with animation
+        </span>
+        <span className="chip good">
+          <span className="dot" />
+          Idle gesture "ไม่ทำอะไรเลย" excluded from word count
         </span>
       </div>
 
       {loading ? (
         <div className="empty">Loading signs...</div>
       ) : signs.length === 0 ? (
-        <div className="empty">No signs yet — create the first one above.</div>
+        <div className="empty">No signs yet — reindex vocabulary or create the first sign above.</div>
       ) : (
         <div className="tablewrap">
           <table>

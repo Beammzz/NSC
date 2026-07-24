@@ -19,17 +19,17 @@ void main() {
     expect(controller, isNull);
   });
 
-  test('selectedCameraLensProvider defaults to back and flips to front', () {
+  test('selectedCameraLensProvider defaults to front and flips to back', () {
     final container = ProviderContainer();
     addTearDown(container.dispose);
 
-    expect(container.read(selectedCameraLensProvider), CameraLensDirection.back);
+    expect(container.read(selectedCameraLensProvider), CameraLensDirection.front);
 
     container.read(selectedCameraLensProvider.notifier).flip();
 
     expect(
       container.read(selectedCameraLensProvider),
-      CameraLensDirection.front,
+      CameraLensDirection.back,
     );
   });
 }

@@ -171,7 +171,7 @@ class CameraPreviewView(
 
     private val previewView = PreviewView(context)
     private var cameraProvider: ProcessCameraProvider? = null
-    private var lensSelector: CameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+    private var lensSelector: CameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
 
     // Landmark inference runs off the main thread on a single analysis thread;
     // the landmarkers are created lazily there (model load is ~hundreds of ms).

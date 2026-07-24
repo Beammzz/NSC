@@ -394,3 +394,33 @@ func TestLogsStreamAsSSE(t *testing.T) {
 		t.Fatalf("Dev default min_level must be DEBUG, got %v", ai.logRequest.GetMinLevel())
 	}
 }
+
+func TestSetSettingsAutoCleanMax(t *testing.T) {
+	srv, store := testServer(t, &fakeAI{}, config.EnvDev)
+	for i := 0; i < 10; i++ {
+		_ = store.Insert(predlog.Record{Seq: uint64(i), Word: "test"})
+	}
+
+	req, err := http.NewRequest(http.MethodPut, srv.URL+"/api/v1/admin/settings",
+		strings.NewReader(`{"auto_clean_max_predictions": 4}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var res struct {
+		AutoCleanMaxPredictions int64 `json:"auto_clean_max_predictions"`
+	}
+	decodeJSON(t, resp, &res)
+	if res.AutoCleanMaxPredictions != 4 {
+		t.Fatalf("expected auto_clean_max_predictions 4, got %d", res.AutoCleanMaxPredictions)
+	}
+
+	count, _ := store.Count()
+	if count != 4 {
+		t.Fatalf("expected store count 4 after setting limit, got %d", count)
+	}
+}
+

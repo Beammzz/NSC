@@ -14,6 +14,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -51,7 +52,8 @@ func New(ai pb.TslInferenceClient, store *predlog.Store, cfg config.Config) *Han
 // Register mounts the admin routes on mux (unprotected — for tests).
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/admin/status", h.status)
-	mux.HandleFunc("PUT /api/v1/admin/tuning", h.setTuning)
+	mux.HandleFunc("PUT /api/v1/admin/tuning", h.setSettings)
+	mux.HandleFunc("PUT /api/v1/admin/settings", h.setSettings)
 	mux.HandleFunc("GET /api/v1/admin/predictions", h.predictions)
 	mux.HandleFunc("DELETE /api/v1/admin/predictions", h.clearPredictions)
 	mux.HandleFunc("POST /api/v1/admin/model", h.uploadModel)
@@ -62,7 +64,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 // middleware chain (RequireAuth + RequireRole("admin") in production).
 func (h *Handler) RegisterProtected(mux *http.ServeMux, mw func(http.Handler) http.Handler) {
 	mux.Handle("GET /api/v1/admin/status", mw(http.HandlerFunc(h.status)))
-	mux.Handle("PUT /api/v1/admin/tuning", mw(http.HandlerFunc(h.setTuning)))
+	mux.Handle("PUT /api/v1/admin/tuning", mw(http.HandlerFunc(h.setSettings)))
+	mux.Handle("PUT /api/v1/admin/settings", mw(http.HandlerFunc(h.setSettings)))
 	mux.Handle("GET /api/v1/admin/predictions", mw(http.HandlerFunc(h.predictions)))
 	mux.Handle("DELETE /api/v1/admin/predictions", mw(http.HandlerFunc(h.clearPredictions)))
 	mux.Handle("POST /api/v1/admin/model", mw(http.HandlerFunc(h.uploadModel)))
@@ -97,13 +100,17 @@ func tuningFromState(s *pb.TuningState) *tuningJSON {
 
 func (h *Handler) status(w http.ResponseWriter, r *http.Request) {
 	resp := struct {
-		Env              string      `json:"env"`
-		Debug            bool        `json:"debug"`
-		AIOnline         bool        `json:"ai_online"`
-		AIError          string      `json:"ai_error,omitempty"`
-		Tuning           *tuningJSON `json:"tuning,omitempty"`
-		PredictionsTotal int64       `json:"predictions_total"`
+		Env                     string      `json:"env"`
+		Debug                   bool        `json:"debug"`
+		AIOnline                bool        `json:"ai_online"`
+		AIError                 string      `json:"ai_error,omitempty"`
+		Tuning                  *tuningJSON `json:"tuning,omitempty"`
+		AutoCleanMaxPredictions int64       `json:"auto_clean_max_predictions"`
+		PredictionsTotal        int64       `json:"predictions_total"`
 	}{Env: h.cfg.Env, Debug: h.cfg.IsDev()}
+
+	autoMax, _ := h.store.GetAutoCleanMax()
+	resp.AutoCleanMaxPredictions = autoMax
 
 	ctx, cancel := context.WithTimeout(r.Context(), rpcTimeout)
 	defer cancel()
@@ -125,33 +132,61 @@ func (h *Handler) status(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp)
 }
 
-// ---- tuning ----
+// ---- settings ----
 
-func (h *Handler) setTuning(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) setSettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		ConfidenceThreshold    *float32 `json:"confidence_threshold"`
-		IdleMinFramesWithHands *uint32  `json:"idle_min_frames_with_hands"`
-		IdleMotionStdThreshold *float32 `json:"idle_motion_std_threshold"`
+		ConfidenceThreshold     *float32 `json:"confidence_threshold"`
+		IdleMinFramesWithHands  *uint32  `json:"idle_min_frames_with_hands"`
+		IdleMotionStdThreshold  *float32 `json:"idle_motion_std_threshold"`
+		AutoCleanMaxPredictions *int64   `json:"auto_clean_max_predictions"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		httpapi.WriteProblem(w, httpapi.NewProblem(
-			http.StatusBadRequest, "Malformed tuning body", err.Error()))
+			http.StatusBadRequest, "Malformed settings body", err.Error()))
 		return
 	}
-	// debug_mode is deliberately not settable here: it follows ENV in
-	// Backend/.env (see SyncDebugMode).
-	ctx, cancel := context.WithTimeout(r.Context(), rpcTimeout)
-	defer cancel()
-	state, err := h.ai.SetTuning(ctx, &pb.SetTuningRequest{
-		ConfidenceThreshold:    body.ConfidenceThreshold,
-		IdleMinFramesWithHands: body.IdleMinFramesWithHands,
-		IdleMotionStdThreshold: body.IdleMotionStdThreshold,
-	})
-	if err != nil {
-		httpapi.WriteProblem(w, grpcProblem("updating tuning", err))
-		return
+
+	if body.AutoCleanMaxPredictions != nil {
+		if err := h.store.SetAutoCleanMax(*body.AutoCleanMaxPredictions); err != nil {
+			httpapi.WriteProblem(w, httpapi.NewProblem(
+				http.StatusInternalServerError, "Failed to set auto_clean_max_predictions", err.Error()))
+			return
+		}
 	}
-	writeJSON(w, tuningFromState(state))
+
+	var state *pb.TuningState
+	if body.ConfidenceThreshold != nil || body.IdleMinFramesWithHands != nil || body.IdleMotionStdThreshold != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), rpcTimeout)
+		defer cancel()
+		var err error
+		state, err = h.ai.SetTuning(ctx, &pb.SetTuningRequest{
+			ConfidenceThreshold:    body.ConfidenceThreshold,
+			IdleMinFramesWithHands: body.IdleMinFramesWithHands,
+			IdleMotionStdThreshold: body.IdleMotionStdThreshold,
+		})
+		if err != nil {
+			httpapi.WriteProblem(w, grpcProblem("updating tuning", err))
+			return
+		}
+	} else {
+		ctx, cancel := context.WithTimeout(r.Context(), rpcTimeout)
+		defer cancel()
+		state, _ = h.ai.GetTuning(ctx, &pb.GetTuningRequest{})
+	}
+
+	autoMax, _ := h.store.GetAutoCleanMax()
+	type settingsResponse struct {
+		*tuningJSON
+		AutoCleanMaxPredictions int64 `json:"auto_clean_max_predictions"`
+	}
+	res := settingsResponse{
+		AutoCleanMaxPredictions: autoMax,
+	}
+	if state != nil {
+		res.tuningJSON = tuningFromState(state)
+	}
+	writeJSON(w, res)
 }
 
 // ---- prediction log ----
@@ -339,7 +374,7 @@ func (h *Handler) logs(w http.ResponseWriter, r *http.Request) {
 		minLevel = pb.LogLevel_LOG_LEVEL_DEBUG
 	}
 	if v := r.URL.Query().Get("min_level"); v != "" {
-		lvl, ok := logLevelValues[v]
+		lvl, ok := logLevelValues[strings.ToLower(v)]
 		if !ok {
 			httpapi.WriteProblem(w, httpapi.NewProblem(
 				http.StatusBadRequest, "Invalid min_level",

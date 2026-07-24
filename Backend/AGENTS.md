@@ -20,11 +20,11 @@ Golang REST & WebSocket API server: gateway between the Flutter client and the P
 | `backend/internal/httpapi/` | RFC 7807 Problem Details type and response writer |
 | `backend/internal/stream/` | `/api/v1/stream` WebSocket handler, WS message types (mirrors `docs/api/stream-schema.md`), gRPC AI client (`AIClient`/`AIStream` interfaces + `GRPCClient`) |
 | `backend/internal/pb/` | protoc-generated stubs from `docs/api/tsl_inference.proto` — never edit by hand; regenerate (see Work Guidance) |
-| `backend/internal/admin/` | `/api/v1/admin/*` REST handlers (status, tuning, predictions listing and clearing via `DELETE`, model upload, SSE log stream) + `SyncDebugMode` background goroutine |
-| `backend/internal/learn/` | Learning tab API: SQLite store + seed (topics/exercises/dictionary/progress), `/api/v1/learn/*` user routes and `/api/v1/admin/learn/*` CRUD routes |
-| `backend/internal/predlog/` | Pure-Go SQLite (`modernc.org/sqlite`) prediction history store supporting insertion, paginated query, count, and clearing |
+| `backend/internal/admin/` | `/api/v1/admin/*` REST handlers (status, settings/tuning, auto-clean config, predictions listing and clearing via `DELETE`, model upload, SSE log stream) + `SyncDebugMode` background goroutine |
+| `backend/internal/learn/` | Learning tab API: SQLite store + seed (topics/exercises/dictionary/progress), `/api/v1/learn/*` user routes and `/api/v1/admin/learn/*` CRUD routes (including th-sl.com sign link import via `POST /api/v1/admin/learn/signs/import-thsl`) |
+| `backend/internal/predlog/` | Pure-Go SQLite (`modernc.org/sqlite`) prediction history store supporting insertion, paginated query, count, clearing, and configurable auto-cleaning (`SetAutoCleanMax`/`Prune`) |
 | `backend/internal/webui/` | Embeds and serves the compiled Next.js admin static export (`dist/`) at `/` |
-| `backend/webui/` | Next.js 15 + React 19 static admin web application source code (including AuthProvider, login page, dictionary recording and animation preview via modal pop-up, direct file upload, and user management UI) |
+| `backend/webui/` | Next.js 15 + React 19 static admin web application source code (nav sidebar: Server dashboard, TSL Model [Predictions Log, AI Logs, Settings (Model Upload, Prediction Log Auto-Cleaning, Runtime Model Tuning, Active Model Summary, Guide)], LLM Model [Coming soon], Learning, Dictionary [webcam recorder, file upload, th-sl.com link import, preview], Users; including AuthProvider, login page, parameter documentation, and user management UI) |
 
 ---
 
@@ -33,7 +33,7 @@ Golang REST & WebSocket API server: gateway between the Flutter client and the P
 - Go 1.22+; standard `cmd/` + `internal/` layout per the root Repository Layout.
 - Endpoints per root API rules: `/api/v1/stream` (WSS, landmark frames).
 - Admin web UI served at `/` and admin API at `/api/v1/admin/*` (status, tuning, paginated predictions listing & clearing via `DELETE`, multipart model upload, SSE logs).
-- Learning tab API (`internal/learn`): `/api/v1/learn/{topics,dictionary,dictionary/{word},progress}` require any authenticated JWT; `/api/v1/admin/learn/{topics,exercises}` CRUD requires the admin role. Exercises carry a per-exercise `pass_confidence` (default 0.8) editable in the webui; `POST /api/v1/learn/progress` derives `passed` server-side from that threshold and progress never regresses. Content seeds idempotently on startup from the 150-word vocabulary (`seed.go` — keep `dictionaryCategories` in sync with `label_map.json`); topics seed only when none exist so admin edits survive restarts.
+- Learning tab API (`internal/learn`): `/api/v1/learn/{topics,dictionary,dictionary/{word},progress}` require any authenticated JWT; `/api/v1/admin/learn/{topics,exercises,signs,signs/import-thsl}` CRUD requires the admin role. `POST /api/v1/admin/learn/signs/import-thsl` fetches th-sl.com entry pages, extracts the word and video URL, downloads the video, runs MediaPipe keypoint extraction, and stores the animated sign entry. Exercises carry a per-exercise `pass_confidence` (default 0.8) editable in the webui; `POST /api/v1/learn/progress` derives `passed` server-side from that threshold and progress never regresses. Content seeds idempotently on startup from the 150-word vocabulary (`seed.go` — keep `dictionaryCategories` in sync with `label_map.json`); topics seed only when none exist so admin edits survive restarts.
 - Landmark frames forward to the Python AI service over gRPC bidirectional streaming only — no HTTP fallback on that path.
 - Stream payloads carry `schema_version`; the schema lives in `docs/api/stream-schema.md` and breaking changes require a version bump there first.
 - Configuration loads optional `Backend/.env` (`ENV=Dev|Prod`); `ENV=Dev` enables full debug output end-to-end, and `admin.SyncDebugMode` propagates `debug_mode` to the Python AI inference service.

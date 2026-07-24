@@ -81,9 +81,13 @@ $procs = @()
 function Stop-All {
     foreach ($p in $script:procs) {
         if ($p -and -not $p.HasExited) {
-            # /T kills the process tree (go run spawns the compiled binary as a
-            # child); PID-targeted, never by image name.
-            taskkill /PID $p.Id /T /F 2>$null | Out-Null
+            # Give process grace period to exit cleanly from Ctrl+C / SIGTERM signal
+            $null = $p.WaitForExit(2000)
+            if (-not $p.HasExited) {
+                # /T kills the process tree (go run spawns the compiled binary as a
+                # child); PID-targeted, never by image name.
+                taskkill /PID $p.Id /T /F 2>$null | Out-Null
+            }
         }
     }
 }

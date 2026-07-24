@@ -7,12 +7,11 @@ import 'package:signmind/features/settings/presentation/providers/settings_provi
 /// Must match `MainActivity.CAMERA_PREVIEW_VIEW_TYPE` in the Android host.
 const nativeCameraViewType = 'signmind/camera_preview';
 
-/// Which camera the scanner preview shows. Defaults to the back camera:
-/// MediaPipe handedness (Stage B/C) only matches the trained model on a
-/// non-mirrored back-camera feed, so the front camera is preview-only.
+/// Which camera the scanner preview shows. Defaults to the front camera
+/// for a selfie-style UX; the back camera is available via the flip button.
 class SelectedCameraLens extends Notifier<CameraLensDirection> {
   @override
-  CameraLensDirection build() => CameraLensDirection.back;
+  CameraLensDirection build() => CameraLensDirection.front;
 
   /// Switches between the back and front camera.
   void flip() {

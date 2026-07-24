@@ -387,6 +387,79 @@ func TestAdminSignRecordingUnknownWordNoCategory(t *testing.T) {
 	}
 }
 
+func TestAdminImportFromThsl(t *testing.T) {
+	fx := &fakeExtractor{configured: true, frames: json.RawMessage(`[[{"x":0.5,"y":0.5,"z":0}]]`)}
+	srv, _, adminToken, store := testServerExt(t, fx)
+
+	mockSite := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/75993/" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(`<!DOCTYPE html><html><head><title>ว่าไง (ท่ามือที่1) - ฐานข้อมูลภาษามือไทย</title></head>
+			<body><div class="elementor-shortcode">ว่าไง (ท่ามือที่1)</div>
+			<video src="` + r.Header.Get("X-Video-Host") + `/videos/wagai.mp4"></video>
+			</body></html>`))
+			return
+		}
+		if r.URL.Path == "/videos/wagai.mp4" {
+			w.Header().Set("Content-Type", "video/mp4")
+			_, _ = w.Write([]byte("fake video content"))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(mockSite.Close)
+
+	// HTML video src needs full mock URL
+	htmlContent := `<!DOCTYPE html><html><head><title>ว่าไง (ท่ามือที่1) - ฐานข้อมูลภาษามือไทย</title></head>
+	<body><div class="elementor-shortcode">ว่าไง (ท่ามือที่1)</div>
+	<video src="` + mockSite.URL + `/videos/wagai.mp4"></video>
+	</body></html>`
+
+	mockSite2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/75993/" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(htmlContent))
+			return
+		}
+		if r.URL.Path == "/videos/wagai.mp4" {
+			w.Header().Set("Content-Type", "video/mp4")
+			_, _ = w.Write([]byte("fake video content"))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(mockSite2.Close)
+
+	resp := doJSON(t, "POST", srv.URL+"/api/v1/admin/learn/signs/import-thsl", adminToken,
+		`{"url": "`+mockSite2.URL+`/75993/"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("import-thsl: status = %d, want 200", resp.StatusCode)
+	}
+
+	var res struct {
+		Word         string `json:"word"`
+		Category     string `json:"category"`
+		HasAnimation bool   `json:"has_animation"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		t.Fatalf("decoding import result: %v", err)
+	}
+	if res.Word != "ว่าไง" {
+		t.Errorf("imported word = %q, want %q", res.Word, "ว่าไง")
+	}
+	if res.Category != "imported" {
+		t.Errorf("imported category = %q, want %q", res.Category, "imported")
+	}
+
+	sg, err := store.GetSign("ว่าไง")
+	if err != nil || !sg.HasAnimation {
+		t.Fatalf("sign not stored in db: %+v err=%v", sg, err)
+	}
+	if fx.gotExt != ".mp4" || fx.gotBytes == 0 {
+		t.Errorf("fakeExtractor ext=%q bytes=%d", fx.gotExt, fx.gotBytes)
+	}
+}
+
 func jsonInt(v int64) string {
 	b, _ := json.Marshal(v)
 	return string(b)

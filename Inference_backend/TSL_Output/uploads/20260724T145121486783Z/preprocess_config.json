@@ -1,0 +1,7 @@
+{
+  "hand_local_norm": true,
+  "hand_scale_norm": true,
+  "use_velocity": true,
+  "use_acceleration": true,
+  "confidence_threshold": 0.6
+}

@@ -4,11 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/admin"
@@ -121,8 +124,9 @@ func main() {
 	// Static webui served at / (API routes win by mux specificity).
 	mux.Handle("/", webui.Handler())
 
-	// ---- background goroutines ----
-	ctx := context.Background()
+	// ---- signal context for graceful shutdown ----
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	// ENV owns the AI service's debug_mode; the sync loop reasserts it
 	// across AI restarts (runtime tuning resets there).
@@ -136,10 +140,35 @@ func main() {
 		handler = requestLog(mux)
 	}
 
-	log.Printf("SignMind AI backend listening on %s (AI service: %s, ENV: %s, signup: %v)",
-		cfg.HTTPAddr, cfg.AIAddr, cfg.Env, cfg.AllowSignup)
-	if err := http.ListenAndServe(cfg.HTTPAddr, handler); err != nil {
-		log.Fatalf("http server: %v", err)
+	srv := &http.Server{
+		Addr:    cfg.HTTPAddr,
+		Handler: handler,
+	}
+
+	serverErr := make(chan error, 1)
+	go func() {
+		log.Printf("SignMind AI backend listening on %s (AI service: %s, ENV: %s, signup: %v)",
+			cfg.HTTPAddr, cfg.AIAddr, cfg.Env, cfg.AllowSignup)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErr <- err
+		}
+	}()
+
+	select {
+	case err := <-serverErr:
+		log.Fatalf("http server failed: %v", err)
+	case <-ctx.Done():
+		log.Println("Shutdown signal received, shutting down SignMind AI backend...")
+		stop() // stop catching signals so second Ctrl+C exits immediately
+
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("HTTP server Shutdown error: %v", err)
+		} else {
+			log.Println("SignMind AI backend HTTP server stopped cleanly.")
+		}
 	}
 }
 

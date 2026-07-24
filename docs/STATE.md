@@ -1,5 +1,44 @@
 # State
 
+## Goal (2026-07-24): S25 FE 5fps — analysis stream bound at 2992x2992
+User: "Why is my performance is terrible? even in the flagship (S25 FE)? like I currently get
+5 fps with no hand."
+ROOT CAUSE (not the model, not the phone): `ImageAnalysis.Builder().setTargetResolution(1280x720)`
+at CameraPreviewView.kt:285. CameraX 1.3.4's legacy matcher groups supported sizes by aspect
+ratio first; the S25 FE front camera exposes only SQUARE output sizes, so a 1280x720 target
+rejects 1088x1088 for being narrower than 1280 and binds the next square up — 2992x2992.
+Evidence `adb shell dumpsys media.camera`: `Consumer name: ImageReader-2992x2992f23m4-20135-2`
+(preview got `SurfaceTexture` 1088x1088). 2992^2 = 8.95 MP vs 720p 0.92 MP = 9.7x the pixels.
+toUprightBitmap (CameraPreviewView.kt:692) therefore moved ~34 MiB/frame (copyPixelsFromBuffer,
+then a software Canvas rotate = read + transposed write), plus a 3rd 34 MiB blit in
+maybeSubmitPose -> `bitmap=79-101ms` EVERY frame before any inference, and MediaPipe got a
+9.7x oversized image -> `hand=70-140ms`. Total 160-215ms = 5-6fps.
+FIX (Dart only — native layer stayed frozen): wired the `configure` MethodChannel, which NOTHING
+had ever called, so every ScannerTuning knob had been sitting at its Kotlin default and the
+Settings resolution dropdown was a no-op on Android. Default cameraResolution 720p -> 480p
+(854x480 target fits 1088x1088). Files: camera_viewport.dart (initState `ref.listenManual` +
+`_applyNativeTuning`), settings_models.dart:61, settings_screen.dart (recommended label moved).
+VERIFIED 2026-07-24 on SM-S731B, release build installed via adb:
+`ImageReader-1088x1088f23m4-31395-2`; logcat `frame ms: bitmap=5 hand=21 hands=0 total=26 fps=13`
+(bitmap 80ms -> 4-9ms, hand 70-140 -> 13-32ms, 5-6fps -> 12-13fps at the targetFps=12 cap);
+pose runs 53 per 121 frames (was 76 per 75 — the 150ms gate now actually bites).
+NOT DONE (user approved for the next store release): replace setTargetResolution with
+`ResolutionSelector` + `ResolutionStrategy(Size(1280,720), FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER)`
+in CameraPreviewView.kt so the bound size is deterministic on every device instead of relying on
+480p happening to land well. Kotlin = store release, not Shorebird-patchable.
+
+## Facts
+- CameraPreviewView.kt (761 lines): `object ScannerTuning` knobs+`update()` 47-155; class
+  `CameraPreviewView` 166+; `startCamera` (use-case bind, resolution choice) 261-297;
+  `analyze` (per-frame critical path, the `frame ms:` log) 346-394; `detectHands` (solo/2-hand
+  routing) 406-437; `maybeSubmitPose` 448-481; `ensureLandmarkers`/delegate builders 483-607;
+  `buildFrame` (EventChannel payload) 647-684; `toUprightBitmap` (copy + rotate) 692-716.
+- MainActivity.kt:42 handles `configure`; ScannerTuning is process-wide, so a configure sent
+  before the PlatformView exists still applies when the view binds.
+- Device profiling limits on this phone: simpleperf is SELinux-blocked (cpu-clock:u and
+  cpu-cycles:u both "Permission denied" despite perf_event_paranoid=-1). Use
+  `dumpsys media.camera` + the SignMindCamera logcat timings instead.
+
 ## Goal (2026-07-23): revert pose cadence to 150ms
 User: "revert hand+pose back to full model". Investigated first — model ASSETS were already
 full on every side (pose_landmarker_full.task 9,398,198 B in Frontend assets + Backend;
@@ -426,6 +465,12 @@ Completed app icon update and installation across both native mobile launcher an
 - 2026-07-19 user (Shorebird prep): "So I want you to look at the kotlin side and see if
   it can optimize or fix anything. So that I dont need to touch the Kotlin side again"
   — keep native layer frozen; future scanner changes go through Dart + `configure`.
+- 2026-07-24 user (LLM scope): "please dont add any feature that I will implement in the
+  final (Coach and conversation). Just auto correct and swap OSV first." Coach AI and AI
+  Conversation are OUT of scope — WebUI placeholder only, no backend/Flutter code.
+- 2026-07-24 user (LLM provider): "Cloud api. due to it is thai model I whine I will use
+  TyphoonAI that is made by SCB DataX" — LLM provider is Typhoon (OpenAI-compatible HTTP),
+  NOT Anthropic. Do not write Anthropic SDK code on this path.
 
 ## Open items
 - Medium/minor review findings deliberately NOT in scope: Flutter token refresh/persistence,
