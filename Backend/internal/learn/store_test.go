@@ -166,6 +166,10 @@ func TestRecordAttempt(t *testing.T) {
 	if !p.Passed || p.BestConfidence != 0.85 {
 		t.Errorf("weaker attempt regressed progress: %+v", p)
 	}
+	// Every try counts, including the failed ones: 3 attempts, 1 correct.
+	if p.Attempts != 3 || p.CorrectAttempts != 1 {
+		t.Errorf("attempts = %d/%d correct, want 3/1", p.Attempts, p.CorrectAttempts)
+	}
 
 	rows, err := s.ListProgress(user)
 	if err != nil {
@@ -174,9 +178,125 @@ func TestRecordAttempt(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("progress rows = %d, want 1", len(rows))
 	}
+	if rows[0].Attempts != 3 || rows[0].CorrectAttempts != 1 {
+		t.Errorf("listed attempts = %d/%d correct, want 3/1",
+			rows[0].Attempts, rows[0].CorrectAttempts)
+	}
+
+	// Another learner's attempts must not leak into this user's tallies.
+	if _, err := s.RecordAttempt(8, ex.ID, 0.95); err != nil {
+		t.Fatalf("recording other user attempt: %v", err)
+	}
+	rows, _ = s.ListProgress(user)
+	if rows[0].Attempts != 3 {
+		t.Errorf("attempts leaked across users: %d, want 3", rows[0].Attempts)
+	}
 
 	if _, err := s.RecordAttempt(user, 9999, 0.9); !errors.Is(err, ErrNotFound) {
 		t.Errorf("attempt on missing exercise: err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestSignNote(t *testing.T) {
+	s := testStore(t)
+	if err := s.UpsertSign("กิน", "กริยา"); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	if err := s.SetSignNote("กิน", "  ยกมือขึ้นที่ปาก  "); err != nil {
+		t.Fatalf("set note: %v", err)
+	}
+	sg, err := s.GetSign("กิน")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if sg.Note != "ยกมือขึ้นที่ปาก" {
+		t.Errorf("note = %q, want trimmed ยกมือขึ้นที่ปาก", sg.Note)
+	}
+	signs, _ := s.ListSigns()
+	if len(signs) != 1 || signs[0].Note != "ยกมือขึ้นที่ปาก" {
+		t.Errorf("listed note = %+v, want the stored note", signs)
+	}
+
+	// The note is a separate row, so a category upsert must not clear it.
+	if err := s.UpsertSign("กิน", "การกระทำ"); err != nil {
+		t.Fatalf("upsert update: %v", err)
+	}
+	sg, _ = s.GetSign("กิน")
+	if sg.Note != "ยกมือขึ้นที่ปาก" {
+		t.Errorf("note lost on category upsert: %+v", sg)
+	}
+
+	// Blank clears it; a sign with no note reads as empty, never an error.
+	if err := s.SetSignNote("กิน", "   "); err != nil {
+		t.Fatalf("clear note: %v", err)
+	}
+	sg, _ = s.GetSign("กิน")
+	if sg.Note != "" {
+		t.Errorf("note = %q after clear, want empty", sg.Note)
+	}
+
+	if err := s.SetSignNote("ไม่มีคำนี้", "x"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("note on missing sign: err = %v, want ErrNotFound", err)
+	}
+
+	// Deleting the sign takes its note with it, so a re-created word starts clean.
+	if err := s.SetSignNote("กิน", "โน้ต"); err != nil {
+		t.Fatalf("re-set note: %v", err)
+	}
+	if err := s.DeleteSign("กิน"); err != nil {
+		t.Fatalf("delete sign: %v", err)
+	}
+	if err := s.UpsertSign("กิน", "กริยา"); err != nil {
+		t.Fatalf("re-create sign: %v", err)
+	}
+	sg, _ = s.GetSign("กิน")
+	if sg.Note != "" {
+		t.Errorf("stale note survived delete: %q", sg.Note)
+	}
+}
+
+func TestListExerciseStats(t *testing.T) {
+	s := testStore(t)
+	topic, _ := s.CreateTopic(Topic{Slug: "t", Title: "ทักทาย", Published: true})
+	ex, _ := s.CreateExercise(Exercise{TopicID: topic.ID, Word: "กิน", PassConfidence: 0.8, Published: true})
+	untouched, _ := s.CreateExercise(Exercise{TopicID: topic.ID, Word: "ดื่ม", PassConfidence: 0.8, Published: true})
+
+	for _, c := range []float64{0.5, 0.9, 0.95} {
+		if _, err := s.RecordAttempt(1, ex.ID, c); err != nil {
+			t.Fatalf("recording attempt: %v", err)
+		}
+	}
+	if _, err := s.RecordAttempt(2, ex.ID, 0.4); err != nil {
+		t.Fatalf("recording second-user attempt: %v", err)
+	}
+
+	stats, err := s.ListExerciseStats()
+	if err != nil {
+		t.Fatalf("listing stats: %v", err)
+	}
+	byID := map[int64]ExerciseStats{}
+	for _, st := range stats {
+		byID[st.ExerciseID] = st
+	}
+	got := byID[ex.ID]
+	if got.Attempts != 4 || got.CorrectAttempts != 2 {
+		t.Errorf("stats = %d attempts / %d correct, want 4/2", got.Attempts, got.CorrectAttempts)
+	}
+	if got.Learners != 2 || got.LearnersPassed != 1 {
+		t.Errorf("learners = %d (%d passed), want 2 (1 passed)", got.Learners, got.LearnersPassed)
+	}
+	if got.TopicTitle != "ทักทาย" || got.Word != "กิน" {
+		t.Errorf("stats labels = %+v", got)
+	}
+
+	// An exercise nobody has tried still reports, with zeroes.
+	zero, ok := byID[untouched.ID]
+	if !ok {
+		t.Fatalf("untried exercise missing from stats")
+	}
+	if zero.Attempts != 0 || zero.Learners != 0 || zero.AvgConfidence != 0 {
+		t.Errorf("untried exercise stats = %+v, want zeroes", zero)
 	}
 }
 

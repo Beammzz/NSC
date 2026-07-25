@@ -10,9 +10,11 @@ import {
   createLearnExercise,
   updateLearnExercise,
   deleteLearnExercise,
+  fetchLearnAnalytics,
   isIdleWord,
   LearnTopic,
   LearnExercise,
+  LearnExerciseStats,
   LearnSign,
   pct,
 } from '../../lib/api';
@@ -51,11 +53,19 @@ export default function LearnPage() {
   const [editingEx, setEditingEx] = useState<number | null>(null);
   const [exThreshold, setExThreshold] = useState(80);
 
+  // Per-exercise attempt rollup across all learners.
+  const [stats, setStats] = useState<LearnExerciseStats[]>([]);
+
   async function load() {
     try {
-      const [t, s] = await Promise.all([fetchLearnTopics(), fetchLearnSigns()]);
+      const [t, s, a] = await Promise.all([
+        fetchLearnTopics(),
+        fetchLearnSigns(),
+        fetchLearnAnalytics(),
+      ]);
       setTopics(t);
       setSigns(s.filter((sign) => !isIdleWord(sign.word)));
+      setStats(a);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -187,6 +197,8 @@ export default function LearnPage() {
   }
 
   const exerciseCount = topics.reduce((n, t) => n + t.exercises.length, 0);
+  const totalAttempts = stats.reduce((n, st) => n + st.attempts, 0);
+  const totalCorrect = stats.reduce((n, st) => n + st.correct_attempts, 0);
 
   return (
     <div>
@@ -481,6 +493,62 @@ export default function LearnPage() {
           </div>
         ))
       )}
+
+      <div className="card" style={{ marginTop: 24 }}>
+        <h2 style={{ marginTop: 0 }}>Practice Analytics</h2>
+        <p style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: 0, marginBottom: 16 }}>
+          Every try a learner takes in the app is logged, including the failed ones. &quot;Correct&quot;
+          means the try met that exercise&apos;s pass threshold.
+        </p>
+        {totalAttempts === 0 ? (
+          <div className="empty">No practice attempts recorded yet.</div>
+        ) : (
+          <>
+            <div className="row" style={{ marginBottom: 12 }}>
+              <span className="chip info">
+                <span className="dot" />
+                {totalCorrect} correct of {totalAttempts} attempts
+                {' · '}
+                {pct(totalCorrect / totalAttempts)} accuracy
+              </span>
+            </div>
+            <div className="tablewrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Topic</th>
+                    <th>Word</th>
+                    <th>Attempts</th>
+                    <th>Correct</th>
+                    <th>Accuracy</th>
+                    <th>Learners</th>
+                    <th>Passed</th>
+                    <th>Avg confidence</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats
+                    .filter((st) => st.attempts > 0)
+                    .map((st) => (
+                      <tr key={st.exercise_id}>
+                        <td>{st.topic_title}</td>
+                        <td className="word">{st.word}</td>
+                        <td>{st.attempts}</td>
+                        <td>{st.correct_attempts}</td>
+                        <td>{pct(st.correct_attempts / st.attempts)}</td>
+                        <td>{st.learners}</td>
+                        <td>
+                          {st.learners_passed}/{st.learners}
+                        </td>
+                        <td>{pct(st.avg_confidence)}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

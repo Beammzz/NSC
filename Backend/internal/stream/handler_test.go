@@ -67,7 +67,7 @@ func (f *fakeAIClient) OpenStream(ctx context.Context) (AIStream, error) {
 
 func dialTestServer(t *testing.T, ai AIClient) (*websocket.Conn, func()) {
 	t.Helper()
-	srv := httptest.NewServer(NewHandler(ai, nil))
+	srv := httptest.NewServer(NewHandler(ai, nil, nil))
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
@@ -224,7 +224,7 @@ func TestPredictionsReachRecorder(t *testing.T) {
 	aiStream := newFakeAIStream()
 	recorded := make(chan *pb.Prediction, 1)
 	srv := httptest.NewServer(NewHandler(&fakeAIClient{stream: aiStream},
-		func(p *pb.Prediction) { recorded <- p }))
+		func(p *pb.Prediction) { recorded <- p }, nil))
 	defer srv.Close()
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
@@ -246,7 +246,7 @@ func TestPredictionsReachRecorder(t *testing.T) {
 }
 
 func TestAIUnavailableReturnsProblem(t *testing.T) {
-	srv := httptest.NewServer(NewHandler(&fakeAIClient{openErr: errors.New("ai down")}, nil))
+	srv := httptest.NewServer(NewHandler(&fakeAIClient{openErr: errors.New("ai down")}, nil, nil))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL)

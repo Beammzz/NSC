@@ -99,6 +99,35 @@ Emitted whenever the AI service produces a prediction (requires a full
 | `top` | array | Up to 5 `{label, prob}` entries, descending, `prob > 0.01`. |
 | `inference_micros` | integer | Python-side inference wall time in microseconds. |
 
+### `sentence`
+
+Emitted once per signing burst: the backend buffers the words it recognized and
+composes them into a single Thai sentence after the signer pauses (the pause
+window and word cap are admin settings — `internal/llm`). The client speaks this
+through on-device TTS instead of speaking each word as it arrives.
+
+```json
+{
+  "schema_version": 1,
+  "type": "sentence",
+  "sentence": "ฉันรักเธอ",
+  "words": ["ฉัน", "รัก", "เธอ"],
+  "fallback": true,
+  "latency_ms": 412
+}
+```
+
+| Field | Type | Rules |
+|---|---|---|
+| `sentence` | string | The composed sentence. Never empty — no message is sent when there is nothing to say. |
+| `words` | string array | The recognized glosses the sentence was built from, in recognition order. |
+| `fallback` | bool | True when the backend joined the words itself (LLM unconfigured, unreachable, or its reply rejected). The text is still correct Thai, just not reordered or given function words. |
+| `latency_ms` | integer | Wall time of the LLM call; 0 when `fallback` and no call was made. |
+
+Additive per the versioning rules below: `schema_version` stays 1, and clients
+that do not know this type simply ignore it. A `reset` from the client drops the
+buffer without composing.
+
 ### `error`
 
 RFC 7807 Problem Details, wrapped for WS transport. Fatal errors are followed

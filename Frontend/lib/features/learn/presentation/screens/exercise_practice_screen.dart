@@ -1,33 +1,38 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:signmind/core/theme/app_theme.dart';
 import 'package:signmind/features/learn/domain/models/learn_models.dart';
 import 'package:signmind/features/learn/presentation/providers/learn_provider.dart';
+import 'package:signmind/features/learn/presentation/screens/topic_summary_screen.dart';
 import 'package:signmind/features/scanner/presentation/providers/scanner_provider.dart';
 import 'package:signmind/features/scanner/presentation/widgets/camera_viewport.dart';
 import 'package:signmind/features/settings/presentation/providers/settings_provider.dart';
 
 /// Route arguments for `/learn/practice`.
 class PracticeArgs {
-  const PracticeArgs({required this.exercise, required this.topicTitle});
+  const PracticeArgs({required this.topic, required this.exercise});
 
+  final LearnTopic topic;
   final LearnExercise exercise;
-  final String topicTitle;
 }
 
-/// Full-screen perform-the-sign exercise: reuses the scanner camera +
-/// landmark pipeline and passes when the model predicts the target word at
-/// or above the exercise's confidence threshold (admin-editable).
+/// Step 2 of an exercise: reuses the scanner camera + landmark pipeline.
+/// Each try is an explicit, bounded capture window so that "N correct out of
+/// M attempts" counts something the learner deliberately did; the try passes
+/// when the model predicts the target word at or above the exercise's
+/// confidence threshold (admin-editable).
 class ExercisePracticeScreen extends ConsumerStatefulWidget {
   const ExercisePracticeScreen({
     super.key,
+    required this.topic,
     required this.exercise,
-    required this.topicTitle,
   });
 
+  final LearnTopic topic;
   final LearnExercise exercise;
-  final String topicTitle;
 
   @override
   ConsumerState<ExercisePracticeScreen> createState() =>
@@ -36,14 +41,33 @@ class ExercisePracticeScreen extends ConsumerStatefulWidget {
 
 class _ExercisePracticeScreenState
     extends ConsumerState<ExercisePracticeScreen> {
+  /// How long one try listens to the model before it is scored.
+  static const _captureWindow = Duration(seconds: 3);
+
   bool _passed = false;
   double _bestConfidence = 0.0;
   bool _recording = false;
   int _demoDetectedFrames = 0;
 
+  bool _capturing = false;
+  Timer? _captureTimer;
+  double _captureBest = 0.0;
+  int _attempts = 0;
+  int _correct = 0;
+  bool? _lastAttemptPassed;
+
   @override
   void initState() {
     super.initState();
+    // Seed the tally from stored progress so the on-screen count continues
+    // where an earlier session left off rather than restarting at 0.
+    final stored = ref.read(learnProgressProvider).value?[widget.exercise.id];
+    if (stored != null) {
+      _attempts = stored.attempts;
+      _correct = stored.correctAttempts;
+      _bestConfidence = stored.bestConfidence;
+      _passed = stored.passed;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // The native camera preview is normally mounted only on the scanner
       // tab; this screen lives outside that tab, so request the mount
@@ -57,6 +81,7 @@ class _ExercisePracticeScreenState
 
   @override
   void dispose() {
+    _captureTimer?.cancel();
     // Releasing the mount after this frame lets the tree tear down first.
     final override = ref.read(cameraMountOverrideProvider.notifier);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -65,46 +90,101 @@ class _ExercisePracticeScreenState
     super.dispose();
   }
 
-  Future<void> _onFrame() async {
-    if (_passed || _recording) return;
+  /// Opens a capture window. Everything the model reports inside it belongs
+  /// to this one attempt; nothing outside it is scored.
+  void _startAttempt() {
+    if (_passed || _capturing || _recording) return;
+    _captureTimer?.cancel();
+    setState(() {
+      _capturing = true;
+      _captureBest = 0.0;
+      _demoDetectedFrames = 0;
+      _lastAttemptPassed = null;
+    });
+    _captureTimer = Timer(_captureWindow, _finishAttempt);
+  }
+
+  /// Keeps the best confidence seen for the target word inside the window.
+  void _onFrame() {
+    if (!_capturing) return;
     final state = ref.read(scannerProvider);
     final exercise = widget.exercise;
 
-    double? attemptConfidence;
     final isDetected = state.demoPhase != 0 && state.currentWord != '…';
     if (isDetected && state.currentWord == exercise.word) {
-      attemptConfidence = state.confidence;
-    } else if (isDetected &&
-        ref.read(settingsProvider).useSimulatedStream) {
+      if (state.confidence > _captureBest) {
+        _captureBest = state.confidence;
+      }
+    } else if (isDetected && ref.read(settingsProvider).useSimulatedStream) {
       // Demo mode: the simulated stream loops fixed demo words that never
       // match real exercise vocabulary, so accept a few detected frames as
       // a successful attempt to keep the offline demo flow completable.
       _demoDetectedFrames++;
       if (_demoDetectedFrames >= 3) {
-        attemptConfidence = exercise.passConfidence + 0.1;
+        _captureBest = exercise.passConfidence + 0.1;
       }
     }
-    if (attemptConfidence == null ||
-        attemptConfidence <= _bestConfidence) {
-      return;
-    }
+  }
 
-    _recording = true;
+  /// Scores the window and posts it. A window where the target word never
+  /// appeared is still an attempt — it is posted at confidence 0 so the
+  /// "correct out of attempts" tally counts the misses too.
+  Future<void> _finishAttempt() async {
+    if (!mounted) return;
+    final exercise = widget.exercise;
+    final confidence = _captureBest.clamp(0.0, 1.0);
+    final correct = confidence >= exercise.passConfidence;
+    setState(() {
+      _capturing = false;
+      _recording = true;
+    });
     try {
       final row = await ref
           .read(learnProgressProvider.notifier)
-          .recordAttempt(exercise.id, attemptConfidence.clamp(0.0, 1.0));
+          .recordAttempt(exercise.id, confidence);
       if (!mounted) return;
       setState(() {
         _bestConfidence = row.bestConfidence;
         _passed = row.passed;
+        _attempts = row.attempts;
+        _correct = row.correctAttempts;
+        _lastAttemptPassed = correct;
       });
     } catch (_) {
-      // Offline/server error: keep practicing; the pass banner simply
-      // won't show until an attempt is stored.
+      // Offline/server error: keep practicing. The pass banner still waits
+      // for a stored attempt, but the local tally moves so the learner sees
+      // the try was counted.
+      if (!mounted) return;
+      setState(() {
+        _attempts += 1;
+        if (correct) _correct += 1;
+        if (confidence > _bestConfidence) _bestConfidence = confidence;
+        _lastAttemptPassed = correct;
+      });
     } finally {
-      _recording = false;
+      if (mounted) setState(() => _recording = false);
     }
+  }
+
+  /// True once every exercise in this topic is passed — the trigger for the
+  /// end-of-topic summary.
+  bool _isTopicComplete() {
+    final progress =
+        ref.read(learnProgressProvider).value ?? const <int, LearnProgress>{};
+    final exercises = widget.topic.exercises;
+    return exercises.isNotEmpty &&
+        exercises.every((e) => progress[e.id]?.passed ?? false);
+  }
+
+  void _leavePractice() {
+    if (_isTopicComplete()) {
+      context.pushReplacement(
+        '/learn/summary',
+        extra: TopicSummaryArgs(topic: widget.topic),
+      );
+      return;
+    }
+    context.pop();
   }
 
   @override
@@ -123,7 +203,7 @@ class _ExercisePracticeScreenState
         foregroundColor: context.textColor,
         elevation: 0,
         title: Text(
-          widget.topicTitle,
+          widget.topic.title,
           style: const TextStyle(fontSize: 16),
         ),
       ),
@@ -195,21 +275,74 @@ class _ExercisePracticeScreenState
 
             // Live feedback / result.
             Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
                 child: _passed
                     ? _PassedCard(
                         word: exercise.word,
                         confidence: _bestConfidence,
-                        onDone: () => context.pop(),
+                        attempts: _attempts,
+                        correct: _correct,
+                        topicComplete: _isTopicComplete(),
+                        onDone: _leavePractice,
                       )
-                    : _LiveFeedback(
-                        isMatch: isMatch,
-                        currentWord: state.currentWord,
-                        confidence: state.confidence,
-                        threshold: exercise.passConfidence,
-                        bestConfidence: _bestConfidence,
-                        isScanning: state.isScanning,
+                    : Column(
+                        children: [
+                          _LiveFeedback(
+                            isMatch: isMatch,
+                            currentWord: state.currentWord,
+                            confidence: state.confidence,
+                            threshold: exercise.passConfidence,
+                            bestConfidence: _bestConfidence,
+                            isScanning: state.isScanning,
+                            capturing: _capturing,
+                            recording: _recording,
+                            lastAttemptPassed: _lastAttemptPassed,
+                            attempts: _attempts,
+                            correct: _correct,
+                          ),
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              onPressed: _capturing || _recording
+                                  ? null
+                                  : _startAttempt,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppTheme.primaryAccent,
+                                foregroundColor: Colors.white,
+                                disabledBackgroundColor:
+                                    AppTheme.primaryAccent.withAlpha(90),
+                                disabledForegroundColor:
+                                    Colors.white.withAlpha(160),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                              icon: Icon(
+                                _capturing
+                                    ? Icons.fiber_manual_record
+                                    : Icons.play_arrow_rounded,
+                                size: 20,
+                              ),
+                              label: Text(
+                                _capturing
+                                    ? 'กำลังจับท่า…'
+                                    : _recording
+                                        ? 'กำลังบันทึกผล…'
+                                        : _attempts == 0
+                                            ? 'เริ่มลองทำท่า'
+                                            : 'ลองอีกครั้ง',
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
               ),
             ),
@@ -228,6 +361,11 @@ class _LiveFeedback extends StatelessWidget {
     required this.threshold,
     required this.bestConfidence,
     required this.isScanning,
+    required this.capturing,
+    required this.recording,
+    required this.lastAttemptPassed,
+    required this.attempts,
+    required this.correct,
   });
 
   final bool isMatch;
@@ -236,18 +374,40 @@ class _LiveFeedback extends StatelessWidget {
   final double threshold;
   final double bestConfidence;
   final bool isScanning;
+  final bool capturing;
+  final bool recording;
+
+  /// Result of the try that just finished; null before the first one.
+  final bool? lastAttemptPassed;
+  final int attempts;
+  final int correct;
 
   @override
   Widget build(BuildContext context) {
-    final statusColor =
-        isMatch ? AppTheme.successGreen : context.textMutedColor;
-    final statusText = !isScanning
-        ? 'กล้องหยุดชั่วคราว — แตะปุ่มบนกล้องเพื่อสแกนต่อ'
-        : isMatch
-            ? 'ตรวจพบ "$currentWord" (${(confidence * 100).round()}%)'
-            : currentWord == '…'
-                ? 'กำลังตรวจจับท่าทาง…'
-                : 'ตรวจพบ "$currentWord" — ลองทำท่าอีกครั้ง';
+    final statusColor = capturing
+        ? (isMatch ? AppTheme.successGreen : AppTheme.primaryAccent)
+        : lastAttemptPassed == null
+            ? context.textMutedColor
+            : lastAttemptPassed!
+                ? AppTheme.successGreen
+                : context.textMutedColor;
+    final String statusText;
+    if (!isScanning) {
+      statusText = 'กล้องหยุดชั่วคราว — แตะปุ่มบนกล้องเพื่อสแกนต่อ';
+    } else if (capturing) {
+      statusText = isMatch
+          ? 'กำลังจับท่า — ตรวจพบ "$currentWord" (${(confidence * 100).round()}%)'
+          : 'กำลังจับท่า — ทำท่าค้างไว้จนกว่าจะครบเวลา';
+    } else if (recording) {
+      statusText = 'กำลังบันทึกผลการลอง…';
+    } else if (lastAttemptPassed == null) {
+      statusText = 'กดปุ่มด้านล่างเมื่อพร้อม แล้วทำท่าภายใน '
+          '${_ExercisePracticeScreenState._captureWindow.inSeconds} วินาที';
+    } else if (lastAttemptPassed!) {
+      statusText = 'ครั้งล่าสุด: ถูกต้อง 🎉';
+    } else {
+      statusText = 'ครั้งล่าสุด: ยังไม่ถึงเกณฑ์ — ลองใหม่อีกครั้ง';
+    }
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -284,12 +444,25 @@ class _LiveFeedback extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 6),
-          Text(
-            'ดีที่สุด ${(bestConfidence * 100).round()}% / เกณฑ์ ${(threshold * 100).round()}%',
-            style: TextStyle(
-              fontSize: 12,
-              color: context.textMutedColor,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'ดีที่สุด ${(bestConfidence * 100).round()}% / เกณฑ์ ${(threshold * 100).round()}%',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: context.textMutedColor,
+                ),
+              ),
+              Text(
+                'ถูก $correct/$attempts ครั้ง',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: context.textMutedColor,
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -301,11 +474,17 @@ class _PassedCard extends StatelessWidget {
   const _PassedCard({
     required this.word,
     required this.confidence,
+    required this.attempts,
+    required this.correct,
+    required this.topicComplete,
     required this.onDone,
   });
 
   final String word;
   final double confidence;
+  final int attempts;
+  final int correct;
+  final bool topicComplete;
   final VoidCallback onDone;
 
   @override
@@ -332,15 +511,22 @@ class _PassedCard extends StatelessWidget {
               color: context.textColor,
             ),
           ),
+          const SizedBox(height: 6),
+          Text(
+            'คำนี้ทำถูก $correct ครั้ง จาก $attempts ครั้งที่ลอง',
+            style: TextStyle(fontSize: 13, color: context.textMutedColor),
+          ),
           const SizedBox(height: 14),
           ElevatedButton(
             onPressed: onDone,
             style: ElevatedButton.styleFrom(
               backgroundColor: AppTheme.successGreen,
             ),
-            child: const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-              child: Text('กลับสู่แผนที่บทเรียน'),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              child: Text(
+                topicComplete ? 'ดูสรุปผลของหัวข้อนี้' : 'กลับสู่แผนที่บทเรียน',
+              ),
             ),
           ),
         ],

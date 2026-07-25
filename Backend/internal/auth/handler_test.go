@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -365,5 +366,32 @@ func TestRequireRoleForbids(t *testing.T) {
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d", rec.Code)
+	}
+}
+
+func TestUpdateUserRoleEndpoint(t *testing.T) {
+	h := testHandler(t)
+
+	u, err := h.store.CreateUser("toggle@example.com", "Password1", RoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	idStr := strconv.FormatInt(u.ID, 10)
+	rr := doJSON(t, func(w http.ResponseWriter, r *http.Request) {
+		r.SetPathValue("id", idStr)
+		h.updateUserRole(w, r)
+	}, "PUT", "/api/v1/admin/users/"+idStr+"/role", updateUserRoleRequest{Role: RoleAdmin})
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("updateUserRole: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var updated User
+	if err := json.NewDecoder(rr.Body).Decode(&updated); err != nil {
+		t.Fatalf("decoding updated user: %v", err)
+	}
+	if updated.ID != u.ID || updated.Role != RoleAdmin {
+		t.Fatalf("expected role %q for user %d, got %q", RoleAdmin, u.ID, updated.Role)
 	}
 }

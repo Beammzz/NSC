@@ -110,6 +110,40 @@ func TestDeleteUser(t *testing.T) {
 	}
 }
 
+func TestUpdateUserRole(t *testing.T) {
+	s := testStore(t)
+
+	u, err := s.CreateUser("role@example.com", "Password1", RoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if u.Role != RoleUser {
+		t.Fatalf("expected initial role %q, got %q", RoleUser, u.Role)
+	}
+
+	updated, err := s.UpdateUserRole(u.ID, RoleAdmin)
+	if err != nil {
+		t.Fatalf("UpdateUserRole: %v", err)
+	}
+	if updated.Role != RoleAdmin {
+		t.Fatalf("expected updated role %q, got %q", RoleAdmin, updated.Role)
+	}
+
+	// Toggle back to user.
+	updated2, err := s.UpdateUserRole(u.ID, RoleUser)
+	if err != nil {
+		t.Fatalf("UpdateUserRole: %v", err)
+	}
+	if updated2.Role != RoleUser {
+		t.Fatalf("expected updated role %q, got %q", RoleUser, updated2.Role)
+	}
+
+	// Non-existent user.
+	if _, err := s.UpdateUserRole(9999, RoleAdmin); err == nil {
+		t.Fatal("expected error updating non-existent user role")
+	}
+}
+
 func TestCheckPassword(t *testing.T) {
 	s := testStore(t)
 

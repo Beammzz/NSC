@@ -11,6 +11,15 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 abstract class TslStreamService {
   Stream<TranslationFrame> get translationStream;
   Stream<ConnectionStatus> get connectionStatus;
+
+  /// Sentences the backend composed at the end of a signing pause. Empty for
+  /// implementations where [supportsSentences] is false.
+  Stream<ComposedSentence> get sentenceStream;
+
+  /// True when the server decides where sentences end. The scanner then
+  /// speaks whole sentences instead of each word as it is recognized.
+  bool get supportsSentences;
+
   void sendVector(FeatureVectorFrame frame);
   void start();
   void stop();
@@ -41,6 +50,14 @@ class SimulatedTslStreamService implements TslStreamService {
 
   @override
   Stream<ConnectionStatus> get connectionStatus => _statusController.stream;
+
+  // The demo loop has no server to compose sentences, so the scanner keeps
+  // speaking word by word here.
+  @override
+  Stream<ComposedSentence> get sentenceStream => const Stream.empty();
+
+  @override
+  bool get supportsSentences => false;
 
   @override
   void sendVector(FeatureVectorFrame frame) {
@@ -134,6 +151,33 @@ TranslationFrame? parseServerMessage(
   );
 }
 
+/// Parses one server `sentence` message (docs/api/stream-schema.md,
+/// schema_version 1); returns null for any other message type.
+ComposedSentence? parseServerSentence(String data) {
+  final dynamic decoded;
+  try {
+    decoded = jsonDecode(data);
+  } on FormatException {
+    return null;
+  }
+  if (decoded is! Map<String, dynamic>) return null;
+  if (decoded['type'] != 'sentence') return null;
+
+  final text = (decoded['sentence'] as String? ?? '').trim();
+  if (text.isEmpty) return null;
+
+  final rawWords = decoded['words'];
+  final words = rawWords is List
+      ? rawWords.whereType<String>().toList(growable: false)
+      : const <String>[];
+
+  return ComposedSentence(
+    text: text,
+    words: words,
+    fallback: decoded['fallback'] == true,
+  );
+}
+
 /// Real WebSocket implementation streaming to `<serverUrl>/api/v1/stream`
 /// per docs/api/stream-schema.md.
 class WebSocketTslStreamService implements TslStreamService {
@@ -163,6 +207,7 @@ class WebSocketTslStreamService implements TslStreamService {
   final WebSocketChannel Function(Uri uri) _connect;
   final _controller = StreamController<TranslationFrame>.broadcast();
   final _statusController = StreamController<ConnectionStatus>.broadcast();
+  final _sentenceController = StreamController<ComposedSentence>.broadcast();
 
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _channelSub;
@@ -177,6 +222,12 @@ class WebSocketTslStreamService implements TslStreamService {
 
   @override
   Stream<ConnectionStatus> get connectionStatus => _statusController.stream;
+
+  @override
+  Stream<ComposedSentence> get sentenceStream => _sentenceController.stream;
+
+  @override
+  bool get supportsSentences => true;
 
   void _setStatus(ConnectionStatus status) {
     if (!_statusController.isClosed) {
@@ -239,6 +290,16 @@ class WebSocketTslStreamService implements TslStreamService {
   void _onData(dynamic data) {
     if (data is! String || _controller.isClosed) return;
     final now = DateTime.now();
+
+    // Sentences arrive on their own cadence (once per signing pause), carry
+    // no seq, and are not translation frames — handle and return.
+    final sentence = parseServerSentence(data);
+    if (sentence != null) {
+      if (!_sentenceController.isClosed) {
+        _sentenceController.add(sentence);
+      }
+      return;
+    }
 
     double latencySeconds = 0.0;
     final dynamic decoded;
@@ -319,6 +380,7 @@ class WebSocketTslStreamService implements TslStreamService {
     _teardownChannel();
     _controller.close();
     _statusController.close();
+    _sentenceController.close();
   }
 }
 

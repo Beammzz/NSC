@@ -7,6 +7,7 @@ import {
   fetchSign,
   createSign,
   updateSignCategory,
+  setSignNote,
   deleteSign,
   uploadSignRecording,
   importSignFromThsl,
@@ -78,6 +79,12 @@ function DictionaryPage() {
   const [editingCategoryWord, setEditingCategoryWord] = useState<string | null>(null);
   const [editingCategoryValue, setEditingCategoryValue] = useState<string>('');
   const [savingCategoryWord, setSavingCategoryWord] = useState<string | null>(null);
+
+  // Inline note editor. The note is what the app shows on the example step
+  // before an exercise, so it is written here by hand.
+  const [editingNoteWord, setEditingNoteWord] = useState<string | null>(null);
+  const [editingNoteValue, setEditingNoteValue] = useState<string>('');
+  const [savingNoteWord, setSavingNoteWord] = useState<string | null>(null);
 
   // Search & category filter
   const [searchQuery, setSearchQuery] = useState('');
@@ -245,6 +252,25 @@ function DictionaryPage() {
       fail('Failed to update category', err);
     } finally {
       setSavingCategoryWord(null);
+    }
+  }
+
+  async function handleSaveNote(word: string) {
+    const note = editingNoteValue.trim();
+    setSavingNoteWord(word);
+    setNotice(null);
+    try {
+      await setSignNote(word, note);
+      setSigns((prev) => prev.map((item) => (item.word === word ? { ...item, note } : item)));
+      setNotice({
+        type: 'success',
+        text: note ? `Saved note for "${word}".` : `Cleared note for "${word}".`,
+      });
+      setEditingNoteWord(null);
+    } catch (err) {
+      fail('Failed to save note', err);
+    } finally {
+      setSavingNoteWord(null);
     }
   }
 
@@ -447,6 +473,7 @@ function DictionaryPage() {
                   <tr>
                     <th>Word</th>
                     <th>Category</th>
+                    <th>Note (shown before practice)</th>
                     <th>Animation</th>
                     <th>Actions</th>
                   </tr>
@@ -506,6 +533,71 @@ function DictionaryPage() {
                                 setEditingCategoryValue(s.category || '');
                               }}
                               title="Edit category"
+                            >
+                              ✏️ Edit
+                            </button>
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ maxWidth: 340 }}>
+                        {editingNoteWord === s.word ? (
+                          <span
+                            className="row"
+                            style={{ gap: 4, margin: 0, alignItems: 'flex-start', flexWrap: 'wrap' }}
+                          >
+                            <textarea
+                              value={editingNoteValue}
+                              onChange={(e) => setEditingNoteValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Escape') setEditingNoteWord(null);
+                              }}
+                              autoFocus
+                              rows={4}
+                              maxLength={4000}
+                              disabled={savingNoteWord === s.word}
+                              placeholder="อธิบายวิธีทำท่านี้ให้ผู้เรียนอ่านก่อนฝึก"
+                              style={{ width: 300, padding: '6px 8px', fontSize: 13, resize: 'vertical' }}
+                            />
+                            <span className="row" style={{ gap: 4, margin: 0 }}>
+                              <button
+                                type="button"
+                                style={{ fontSize: 11, padding: '4px 8px' }}
+                                disabled={savingNoteWord === s.word}
+                                onClick={() => handleSaveNote(s.word)}
+                              >
+                                {savingNoteWord === s.word ? '...' : 'Save'}
+                              </button>
+                              <button
+                                type="button"
+                                className="secondary"
+                                style={{ fontSize: 11, padding: '4px 8px' }}
+                                disabled={savingNoteWord === s.word}
+                                onClick={() => setEditingNoteWord(null)}
+                              >
+                                Cancel
+                              </button>
+                            </span>
+                          </span>
+                        ) : (
+                          <span className="row" style={{ gap: 6, margin: 0, alignItems: 'flex-start' }}>
+                            <span
+                              style={{
+                                fontSize: 13,
+                                color: s.note ? 'var(--text)' : 'var(--text-muted)',
+                                whiteSpace: 'pre-wrap',
+                              }}
+                            >
+                              {s.note || '— no note —'}
+                            </span>
+                            <button
+                              type="button"
+                              className="secondary"
+                              style={{ fontSize: 11, padding: '2px 6px', cursor: 'pointer', flexShrink: 0 }}
+                              onClick={() => {
+                                setEditingNoteWord(s.word);
+                                setEditingNoteValue(s.note || '');
+                              }}
+                              title="Edit note"
                             >
                               ✏️ Edit
                             </button>

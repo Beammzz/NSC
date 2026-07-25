@@ -12,6 +12,10 @@ class AppSettings {
   /// scanner camera viewport.
   final bool showDebugOverlay;
 
+  /// When true, the dictionary sign avatar is drawn as a cartoon character;
+  /// when false it falls back to the raw keypoint skeleton.
+  final bool cartoonAvatar;
+
   /// Base URL of the SignMind backend, e.g. `https://signmind.harumi.dev`.
   /// The stream service appends `/api/v1/stream`.
   final String serverUrl;
@@ -37,6 +41,7 @@ class AppSettings {
     required this.confidenceThreshold,
     required this.cameraResolution,
     required this.showDebugOverlay,
+    required this.cartoonAvatar,
     required this.serverUrl,
     required this.useSimulatedStream,
     required this.rememberCredentials,
@@ -60,6 +65,7 @@ class AppSettings {
       // just copying and rotating them. A 854x480 target fits 1088x1088.
       cameraResolution: '480p',
       showDebugOverlay: false,
+      cartoonAvatar: true,
       // Production server default.
       serverUrl: 'https://signmind.harumi.dev',
       useSimulatedStream: false,
@@ -78,6 +84,7 @@ class AppSettings {
     double? confidenceThreshold,
     String? cameraResolution,
     bool? showDebugOverlay,
+    bool? cartoonAvatar,
     String? serverUrl,
     bool? useSimulatedStream,
     bool? rememberCredentials,
@@ -95,6 +102,7 @@ class AppSettings {
       confidenceThreshold: confidenceThreshold ?? this.confidenceThreshold,
       cameraResolution: cameraResolution ?? this.cameraResolution,
       showDebugOverlay: showDebugOverlay ?? this.showDebugOverlay,
+      cartoonAvatar: cartoonAvatar ?? this.cartoonAvatar,
       serverUrl: serverUrl ?? this.serverUrl,
       useSimulatedStream: useSimulatedStream ?? this.useSimulatedStream,
       rememberCredentials: rememberCredentials ?? this.rememberCredentials,

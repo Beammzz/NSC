@@ -44,6 +44,26 @@ CREATE TABLE IF NOT EXISTS learn_progress (
 	updated_ms      INTEGER NOT NULL,
 	PRIMARY KEY (user_id, exercise_id)
 );
+-- Notes live in their own table rather than a learn_signs column so that
+-- existing dictionary databases need no migration and the seeded dictionary
+-- rows are never rewritten.
+CREATE TABLE IF NOT EXISTS learn_sign_notes (
+	word TEXT PRIMARY KEY,
+	note TEXT NOT NULL DEFAULT ''
+);
+-- Append-only log of every practice try. Attempt/correct counts (the learner
+-- summary and the admin analytics) are aggregated from here; learn_progress
+-- keeps only the never-regressing best result.
+CREATE TABLE IF NOT EXISTS learn_attempts (
+	id          INTEGER PRIMARY KEY AUTOINCREMENT,
+	user_id     INTEGER NOT NULL,
+	exercise_id INTEGER NOT NULL,
+	confidence  REAL    NOT NULL,
+	passed      INTEGER NOT NULL,
+	created_ms  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_learn_attempts_user ON learn_attempts(user_id, exercise_id);
+CREATE INDEX IF NOT EXISTS idx_learn_attempts_exercise ON learn_attempts(exercise_id);
 `
 
 // Topic is one roadmap node grouping related exercises (e.g. food, greetings).
@@ -71,19 +91,38 @@ type Exercise struct {
 // Sign is one dictionary entry. KeypointFrames, when present, is the JSON
 // avatar animation ([][]{x,y,z} frames); nil means the client renders a
 // fallback.
+// Note is the admin-written explanation shown on the example step before
+// practice; empty when the admin has not written one.
 type Sign struct {
 	Word           string          `json:"word"`
 	Category       string          `json:"category"`
+	Note           string          `json:"note"`
 	KeypointFrames json.RawMessage `json:"keypoint_frames,omitempty"`
 	HasAnimation   bool            `json:"has_animation"`
 }
 
-// Progress is one user's best result on one exercise.
+// Progress is one user's best result on one exercise. Attempts and
+// CorrectAttempts are aggregated from learn_attempts and, unlike
+// BestConfidence/Passed, count every try including the failed ones.
 type Progress struct {
-	ExerciseID     int64   `json:"exercise_id"`
-	BestConfidence float64 `json:"best_confidence"`
-	Passed         bool    `json:"passed"`
-	UpdatedMS      int64   `json:"updated_ms"`
+	ExerciseID      int64   `json:"exercise_id"`
+	BestConfidence  float64 `json:"best_confidence"`
+	Passed          bool    `json:"passed"`
+	Attempts        int     `json:"attempts"`
+	CorrectAttempts int     `json:"correct_attempts"`
+	UpdatedMS       int64   `json:"updated_ms"`
+}
+
+// ExerciseStats is the admin-facing rollup for one exercise across all users.
+type ExerciseStats struct {
+	ExerciseID      int64   `json:"exercise_id"`
+	Word            string  `json:"word"`
+	TopicTitle      string  `json:"topic_title"`
+	Attempts        int     `json:"attempts"`
+	CorrectAttempts int     `json:"correct_attempts"`
+	Learners        int     `json:"learners"`
+	LearnersPassed  int     `json:"learners_passed"`
+	AvgConfidence   float64 `json:"avg_confidence"`
 }
 
 // ErrNotFound is returned when a topic/exercise/sign does not exist.
@@ -273,8 +312,11 @@ func (s *Store) DeleteExercise(id int64) error {
 // ListSigns returns all dictionary entries ordered by category then word,
 // without keypoint frames (fetch one sign for the animation payload).
 func (s *Store) ListSigns() ([]Sign, error) {
-	rows, err := s.db.Query(
-		`SELECT word, category, keypoint_frames IS NOT NULL FROM learn_signs ORDER BY category, word`)
+	rows, err := s.db.Query(`
+SELECT s.word, s.category, COALESCE(n.note, ''), s.keypoint_frames IS NOT NULL
+FROM learn_signs s
+LEFT JOIN learn_sign_notes n ON n.word = s.word
+ORDER BY s.category, s.word`)
 	if err != nil {
 		return nil, fmt.Errorf("listing signs: %w", err)
 	}
@@ -283,7 +325,7 @@ func (s *Store) ListSigns() ([]Sign, error) {
 	for rows.Next() {
 		var sg Sign
 		var has int
-		if err := rows.Scan(&sg.Word, &sg.Category, &has); err != nil {
+		if err := rows.Scan(&sg.Word, &sg.Category, &sg.Note, &has); err != nil {
 			return nil, fmt.Errorf("scanning sign: %w", err)
 		}
 		sg.HasAnimation = has != 0
@@ -310,9 +352,12 @@ func (s *Store) GetSign(word string) (Sign, error) {
 	word = NormalizeWord(word)
 	var sg Sign
 	var frames sql.NullString
-	err := s.db.QueryRow(
-		`SELECT word, category, keypoint_frames FROM learn_signs WHERE word = ?`, word).
-		Scan(&sg.Word, &sg.Category, &frames)
+	err := s.db.QueryRow(`
+SELECT s.word, s.category, COALESCE(n.note, ''), s.keypoint_frames
+FROM learn_signs s
+LEFT JOIN learn_sign_notes n ON n.word = s.word
+WHERE s.word = ?`, word).
+		Scan(&sg.Word, &sg.Category, &sg.Note, &frames)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Sign{}, ErrNotFound
 	}
@@ -340,6 +385,35 @@ ON CONFLICT (word) DO UPDATE SET category = excluded.category`,
 	return nil
 }
 
+// SetSignNote stores the admin-written note shown on the example step. The
+// dictionary row must already exist; a missing word yields ErrNotFound. An
+// empty note clears the row rather than storing a blank string.
+func (s *Store) SetSignNote(word, note string) error {
+	word = NormalizeWord(word)
+	note = strings.TrimSpace(note)
+	var exists int
+	err := s.db.QueryRow(`SELECT 1 FROM learn_signs WHERE word = ?`, word).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("checking sign: %w", err)
+	}
+	if note == "" {
+		if _, err := s.db.Exec(`DELETE FROM learn_sign_notes WHERE word = ?`, word); err != nil {
+			return fmt.Errorf("clearing sign note: %w", err)
+		}
+		return nil
+	}
+	_, err = s.db.Exec(`
+INSERT INTO learn_sign_notes (word, note) VALUES (?, ?)
+ON CONFLICT (word) DO UPDATE SET note = excluded.note`, word, note)
+	if err != nil {
+		return fmt.Errorf("setting sign note: %w", err)
+	}
+	return nil
+}
+
 // SetKeypointFrames stores the avatar animation JSON for an existing sign
 // (extracted from a recorded clip). The row must already exist — create it
 // with UpsertSign first; a missing word yields ErrNotFound.
@@ -361,16 +435,29 @@ func (s *Store) DeleteSign(word string) error {
 	if err != nil {
 		return fmt.Errorf("deleting sign: %w", err)
 	}
+	if _, err := s.db.Exec(`DELETE FROM learn_sign_notes WHERE word = ?`, word); err != nil {
+		return fmt.Errorf("deleting sign note: %w", err)
+	}
 	return checkFound(res)
 }
 
 // ---- progress ----
 
+// progressSelect joins the never-regressing best result with the attempt
+// tallies. It takes the user id twice: once for the attempt sub-select, once
+// for the caller's own WHERE clause.
+const progressSelect = `
+SELECT p.exercise_id, p.best_confidence, p.passed, p.updated_ms,
+       COALESCE(a.attempts, 0), COALESCE(a.correct, 0)
+FROM learn_progress p
+LEFT JOIN (
+	SELECT exercise_id, COUNT(*) AS attempts, SUM(passed) AS correct
+	FROM learn_attempts WHERE user_id = ? GROUP BY exercise_id
+) a ON a.exercise_id = p.exercise_id`
+
 // ListProgress returns the user's progress rows.
 func (s *Store) ListProgress(userID int64) ([]Progress, error) {
-	rows, err := s.db.Query(
-		`SELECT exercise_id, best_confidence, passed, updated_ms FROM learn_progress WHERE user_id = ?`,
-		userID)
+	rows, err := s.db.Query(progressSelect+` WHERE p.user_id = ?`, userID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("listing progress: %w", err)
 	}
@@ -379,7 +466,8 @@ func (s *Store) ListProgress(userID int64) ([]Progress, error) {
 	for rows.Next() {
 		var p Progress
 		var passed int
-		if err := rows.Scan(&p.ExerciseID, &p.BestConfidence, &passed, &p.UpdatedMS); err != nil {
+		if err := rows.Scan(&p.ExerciseID, &p.BestConfidence, &passed, &p.UpdatedMS,
+			&p.Attempts, &p.CorrectAttempts); err != nil {
 			return nil, fmt.Errorf("scanning progress: %w", err)
 		}
 		p.Passed = passed != 0
@@ -402,6 +490,15 @@ func (s *Store) RecordAttempt(userID, exerciseID int64, confidence float64) (Pro
 	}
 	now := time.Now().UnixMilli()
 	passed := confidence >= ex.PassConfidence
+	// The append-only attempt row is what the "N correct out of M" summary and
+	// the admin analytics count; the progress upsert below only tracks the best.
+	_, err = s.db.Exec(`
+INSERT INTO learn_attempts (user_id, exercise_id, confidence, passed, created_ms)
+VALUES (?, ?, ?, ?, ?)`,
+		userID, exerciseID, confidence, boolInt(passed), now)
+	if err != nil {
+		return Progress{}, fmt.Errorf("logging attempt: %w", err)
+	}
 	_, err = s.db.Exec(`
 INSERT INTO learn_progress (user_id, exercise_id, best_confidence, passed, updated_ms)
 VALUES (?, ?, ?, ?, ?)
@@ -415,14 +512,50 @@ ON CONFLICT (user_id, exercise_id) DO UPDATE SET
 	}
 	var p Progress
 	var passedInt int
-	err = s.db.QueryRow(
-		`SELECT exercise_id, best_confidence, passed, updated_ms FROM learn_progress WHERE user_id = ? AND exercise_id = ?`,
-		userID, exerciseID).Scan(&p.ExerciseID, &p.BestConfidence, &passedInt, &p.UpdatedMS)
+	err = s.db.QueryRow(progressSelect+` WHERE p.user_id = ? AND p.exercise_id = ?`,
+		userID, userID, exerciseID).
+		Scan(&p.ExerciseID, &p.BestConfidence, &passedInt, &p.UpdatedMS,
+			&p.Attempts, &p.CorrectAttempts)
 	if err != nil {
 		return Progress{}, fmt.Errorf("reading back progress: %w", err)
 	}
 	p.Passed = passedInt != 0
 	return p, nil
+}
+
+// ListExerciseStats returns the admin analytics rollup: one row per exercise
+// that has at least one logged attempt, newest content first by topic order.
+func (s *Store) ListExerciseStats() ([]ExerciseStats, error) {
+	rows, err := s.db.Query(`
+SELECT e.id, e.word, t.title,
+       COUNT(a.id),
+       COALESCE(SUM(a.passed), 0),
+       COUNT(DISTINCT a.user_id),
+       COALESCE(AVG(a.confidence), 0),
+       (SELECT COUNT(*) FROM learn_progress p WHERE p.exercise_id = e.id AND p.passed = 1)
+FROM learn_exercises e
+JOIN learn_topics t ON t.id = e.topic_id
+LEFT JOIN learn_attempts a ON a.exercise_id = e.id
+GROUP BY e.id
+ORDER BY t.sort_order, e.sort_order, e.id`)
+	if err != nil {
+		return nil, fmt.Errorf("listing exercise stats: %w", err)
+	}
+	defer rows.Close()
+	out := []ExerciseStats{}
+	for rows.Next() {
+		var st ExerciseStats
+		if err := rows.Scan(&st.ExerciseID, &st.Word, &st.TopicTitle,
+			&st.Attempts, &st.CorrectAttempts, &st.Learners,
+			&st.AvgConfidence, &st.LearnersPassed); err != nil {
+			return nil, fmt.Errorf("scanning exercise stats: %w", err)
+		}
+		out = append(out, st)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("listing exercise stats: %w", err)
+	}
+	return out, nil
 }
 
 func boolInt(b bool) int {

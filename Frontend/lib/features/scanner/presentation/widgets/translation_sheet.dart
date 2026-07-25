@@ -17,6 +17,10 @@ class TranslationSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDetected = state.isScanning && state.demoPhase != 0;
+    // The finished sentence wins while the buffer refills for the next one.
+    final sentenceText = state.sentence.isNotEmpty
+        ? state.sentence.join(' ')
+        : state.composedSentence;
     final confPercent = (state.confidence * 100).round();
     final okColor = state.confidence >= 0.85
         ? AppTheme.successGreen
@@ -130,9 +134,9 @@ class TranslationSheet extends StatelessWidget {
                 borderRadius: BorderRadius.circular(12),
               ),
               alignment: Alignment.centerLeft,
-              child: state.sentence.isNotEmpty
+              child: sentenceText.isNotEmpty
                   ? Text(
-                      state.sentence.join(' '),
+                      sentenceText,
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w500,

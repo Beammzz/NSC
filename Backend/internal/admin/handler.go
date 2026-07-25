@@ -22,6 +22,7 @@ import (
 
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/config"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/httpapi"
+	"gitea.harumi.dev/Harumi/NSC/backend/internal/llm"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/pb"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/predlog"
 )
@@ -42,11 +43,14 @@ const (
 type Handler struct {
 	ai    pb.TslInferenceClient
 	store *predlog.Store
+	llm   *llm.Store
 	cfg   config.Config
 }
 
-func New(ai pb.TslInferenceClient, store *predlog.Store, cfg config.Config) *Handler {
-	return &Handler{ai: ai, store: store, cfg: cfg}
+// New builds the admin API. llmStore may be nil, in which case the
+// /api/v1/admin/llm/* routes report 503 instead of panicking.
+func New(ai pb.TslInferenceClient, store *predlog.Store, llmStore *llm.Store, cfg config.Config) *Handler {
+	return &Handler{ai: ai, store: store, llm: llmStore, cfg: cfg}
 }
 
 // Register mounts the admin routes on mux (unprotected — for tests).
@@ -58,6 +62,10 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/admin/predictions", h.clearPredictions)
 	mux.HandleFunc("POST /api/v1/admin/model", h.uploadModel)
 	mux.HandleFunc("GET /api/v1/admin/logs", h.logs)
+	mux.HandleFunc("GET /api/v1/admin/llm/settings", h.llmSettings)
+	mux.HandleFunc("PUT /api/v1/admin/llm/settings", h.setLLMSettings)
+	mux.HandleFunc("GET /api/v1/admin/llm/logs", h.llmLogs)
+	mux.HandleFunc("DELETE /api/v1/admin/llm/logs", h.clearLLMLogs)
 }
 
 // RegisterProtected mounts admin routes wrapped with the provided auth
@@ -70,6 +78,10 @@ func (h *Handler) RegisterProtected(mux *http.ServeMux, mw func(http.Handler) ht
 	mux.Handle("DELETE /api/v1/admin/predictions", mw(http.HandlerFunc(h.clearPredictions)))
 	mux.Handle("POST /api/v1/admin/model", mw(http.HandlerFunc(h.uploadModel)))
 	mux.Handle("GET /api/v1/admin/logs", mw(http.HandlerFunc(h.logs)))
+	mux.Handle("GET /api/v1/admin/llm/settings", mw(http.HandlerFunc(h.llmSettings)))
+	mux.Handle("PUT /api/v1/admin/llm/settings", mw(http.HandlerFunc(h.setLLMSettings)))
+	mux.Handle("GET /api/v1/admin/llm/logs", mw(http.HandlerFunc(h.llmLogs)))
+	mux.Handle("DELETE /api/v1/admin/llm/logs", mw(http.HandlerFunc(h.clearLLMLogs)))
 }
 
 // ---- status ----
@@ -434,6 +446,180 @@ func (h *Handler) logs(w http.ResponseWriter, r *http.Request) {
 		}
 		flusher.Flush()
 	}
+}
+
+// ---- LLM sentence composition ----
+
+// llmSettingsJSON is the wire form of the LLM configuration. The API key is
+// never sent back in the clear: clients render APIKeyMasked and omit
+// `api_key` from a PUT unless the admin typed a new one.
+type llmSettingsJSON struct {
+	Enabled             bool    `json:"enabled"`
+	Endpoint            string  `json:"endpoint"`
+	APIKeyMasked        string  `json:"api_key_masked"`
+	APIKeySet           bool    `json:"api_key_set"`
+	Model               string  `json:"model"`
+	SystemPrompt        string  `json:"system_prompt"`
+	SilenceMS           int     `json:"silence_ms"`
+	MaxWords            int     `json:"max_words"`
+	TimeoutMS           int     `json:"timeout_ms"`
+	Temperature         float64 `json:"temperature"`
+	AutoCleanMaxLogs    int64   `json:"auto_clean_max_logs"`
+	DefaultSystemPrompt string  `json:"default_system_prompt"`
+	DefaultEndpoint     string  `json:"default_endpoint"`
+	DefaultModel        string  `json:"default_model"`
+}
+
+func llmSettingsToJSON(s llm.Settings) llmSettingsJSON {
+	return llmSettingsJSON{
+		Enabled:             s.Enabled,
+		Endpoint:            s.Endpoint,
+		APIKeyMasked:        maskSecret(s.APIKey),
+		APIKeySet:           s.APIKey != "",
+		Model:               s.Model,
+		SystemPrompt:        s.SystemPrompt,
+		SilenceMS:           s.SilenceMS,
+		MaxWords:            s.MaxWords,
+		TimeoutMS:           s.TimeoutMS,
+		Temperature:         s.Temperature,
+		AutoCleanMaxLogs:    s.AutoCleanMaxLogs,
+		DefaultSystemPrompt: llm.DefaultSystemPrompt,
+		DefaultEndpoint:     llm.DefaultEndpoint,
+		DefaultModel:        llm.DefaultModel,
+	}
+}
+
+// maskSecret keeps only the last 4 characters so an admin can tell which key
+// is installed without the page ever holding the secret.
+func maskSecret(key string) string {
+	if key == "" {
+		return ""
+	}
+	runes := []rune(key)
+	if len(runes) <= 4 {
+		return "••••"
+	}
+	return "••••" + string(runes[len(runes)-4:])
+}
+
+// llmStore returns the store, or writes a 503 problem when the LLM feature
+// was not wired at startup.
+func (h *Handler) llmStore(w http.ResponseWriter) (*llm.Store, bool) {
+	if h.llm == nil {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusServiceUnavailable, "LLM service unavailable",
+			"the server started without an LLM store"))
+		return nil, false
+	}
+	return h.llm, true
+}
+
+func (h *Handler) llmSettings(w http.ResponseWriter, r *http.Request) {
+	store, ok := h.llmStore(w)
+	if !ok {
+		return
+	}
+	settings, err := store.GetSettings()
+	if err != nil {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusInternalServerError, "LLM settings unavailable", err.Error()))
+		return
+	}
+	total, err := store.CountLogs()
+	if err != nil {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusInternalServerError, "LLM log query failed", err.Error()))
+		return
+	}
+	writeJSON(w, struct {
+		llmSettingsJSON
+		LogsTotal int64 `json:"logs_total"`
+	}{llmSettingsToJSON(settings), total})
+}
+
+func (h *Handler) setLLMSettings(w http.ResponseWriter, r *http.Request) {
+	store, ok := h.llmStore(w)
+	if !ok {
+		return
+	}
+	var patch llm.SettingsPatch
+	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusBadRequest, "Malformed LLM settings body", err.Error()))
+		return
+	}
+	// A masked key echoed back from the page would overwrite the real one.
+	if patch.APIKey != nil && strings.HasPrefix(*patch.APIKey, "••••") {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusBadRequest, "Invalid API key",
+			"the masked key was sent back; omit api_key to keep the stored key"))
+		return
+	}
+	settings, err := store.SaveSettings(patch)
+	if err != nil {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusInternalServerError, "Failed to save LLM settings", err.Error()))
+		return
+	}
+	total, err := store.CountLogs()
+	if err != nil {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusInternalServerError, "LLM log query failed", err.Error()))
+		return
+	}
+	writeJSON(w, struct {
+		llmSettingsJSON
+		LogsTotal int64 `json:"logs_total"`
+	}{llmSettingsToJSON(settings), total})
+}
+
+func (h *Handler) llmLogs(w http.ResponseWriter, r *http.Request) {
+	store, ok := h.llmStore(w)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	var opts llm.QueryOptions
+	var err error
+	if opts.Limit, err = intParam(q.Get("limit"), 0); err != nil {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusBadRequest, "Invalid limit", err.Error()))
+		return
+	}
+	if opts.Offset, err = intParam(q.Get("offset"), 0); err != nil {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusBadRequest, "Invalid offset", err.Error()))
+		return
+	}
+	records, err := store.ListLogs(opts)
+	if err != nil {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusInternalServerError, "LLM log query failed", err.Error()))
+		return
+	}
+	total, err := store.CountLogs()
+	if err != nil {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusInternalServerError, "LLM log query failed", err.Error()))
+		return
+	}
+	writeJSON(w, struct {
+		Total   int64           `json:"total"`
+		Records []llm.LogRecord `json:"records"`
+	}{Total: total, Records: records})
+}
+
+func (h *Handler) clearLLMLogs(w http.ResponseWriter, r *http.Request) {
+	store, ok := h.llmStore(w)
+	if !ok {
+		return
+	}
+	if err := store.ClearLogs(); err != nil {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusInternalServerError, "Failed to clear LLM logs", err.Error()))
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ---- helpers ----

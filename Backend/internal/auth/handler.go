@@ -64,6 +64,7 @@ func (h *Handler) Register(mux *http.ServeMux, adminMW func(http.Handler) http.H
 	mux.Handle("GET /api/v1/admin/users", adminMW(http.HandlerFunc(h.listUsers)))
 	mux.Handle("POST /api/v1/admin/users", adminMW(http.HandlerFunc(h.createUser)))
 	mux.Handle("DELETE /api/v1/admin/users/{id}", adminMW(http.HandlerFunc(h.deleteUser)))
+	mux.Handle("PUT /api/v1/admin/users/{id}/role", adminMW(http.HandlerFunc(h.updateUserRole)))
 }
 
 // ---- login ----
@@ -365,6 +366,52 @@ func (h *Handler) deleteUser(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("auth: admin deleted user id=%d", id)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+type updateUserRoleRequest struct {
+	Role string `json:"role"`
+}
+
+func (h *Handler) updateUserRole(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || id <= 0 {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusBadRequest, "Invalid user ID",
+			"id must be a positive integer"))
+		return
+	}
+
+	var body updateUserRoleRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusBadRequest, "Malformed request body", err.Error()))
+		return
+	}
+
+	role := strings.TrimSpace(body.Role)
+	if role != RoleAdmin && role != RoleUser {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusBadRequest, "Invalid role",
+			"role must be 'admin' or 'user'"))
+		return
+	}
+
+	user, err := h.store.UpdateUserRole(id, role)
+	if err != nil {
+		if strings.Contains(err.Error(), "user not found") {
+			httpapi.WriteProblem(w, httpapi.NewProblem(
+				http.StatusNotFound, "User not found",
+				"no user with that ID exists"))
+			return
+		}
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusInternalServerError, "User role update failed", err.Error()))
+		return
+	}
+
+	log.Printf("auth: admin updated user id=%d role=%s", user.ID, user.Role)
+	writeJSON(w, user)
 }
 
 // ---- helpers ----

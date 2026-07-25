@@ -35,8 +35,25 @@ void main() {
       expect(row.passed, isTrue);
       expect(row.bestConfidence, 0.85);
 
+      // Failed tries still count: 3 attempts, 1 of them correct.
+      expect(row.attempts, 3);
+      expect(row.correctAttempts, 1);
+
       final progress = await repo.fetchProgress();
       expect(progress, hasLength(1));
+    });
+
+    test('dictionary entries carry the example note', () async {
+      final repo = SimulatedLearnRepository();
+      final signs = await repo.fetchDictionary();
+      expect(signs.any((s) => s.note.isNotEmpty), isTrue);
+
+      final detail = await repo.fetchSignDetail('ขอโทษ');
+      expect(detail.note, isNotEmpty);
+
+      // A word with no note reads as empty, never null.
+      final unknown = await repo.fetchSignDetail('ไม่มีคำนี้');
+      expect(unknown.note, isEmpty);
     });
   });
 
@@ -92,11 +109,41 @@ void main() {
         'exercise_id': 7,
         'best_confidence': 0.92,
         'passed': true,
+        'attempts': 5,
+        'correct_attempts': 2,
         'updated_ms': 1700000000000,
       });
       expect(row.exerciseId, 7);
       expect(row.bestConfidence, 0.92);
       expect(row.passed, isTrue);
+      expect(row.attempts, 5);
+      expect(row.correctAttempts, 2);
+
+      // Rows from a server without the counters read as 0, not null.
+      final legacy = LearnProgress.fromJson({
+        'exercise_id': 7,
+        'best_confidence': 0.92,
+        'passed': true,
+      });
+      expect(legacy.attempts, 0);
+      expect(legacy.correctAttempts, 0);
+    });
+
+    test('DictionarySign.fromJson parses the note', () {
+      final sign = DictionarySign.fromJson({
+        'word': 'กิน',
+        'category': 'กริยา',
+        'note': 'ยกมือขึ้นที่ปาก',
+        'has_animation': true,
+      });
+      expect(sign.note, 'ยกมือขึ้นที่ปาก');
+
+      final noNote = DictionarySign.fromJson({
+        'word': 'กิน',
+        'category': 'กริยา',
+        'has_animation': false,
+      });
+      expect(noNote.note, isEmpty);
     });
   });
 }

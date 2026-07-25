@@ -142,10 +142,22 @@ class SimulatedLearnRepository implements LearnRepository {
             (word) => DictionarySign(
               word: word,
               category: entry.key,
+              note: _demoNotes[word] ?? '',
               hasAnimation: false,
             ),
           ))
       .toList();
+
+  /// Stand-in for the admin-written notes, so the example step has content
+  /// to show in demo mode. Real notes come from the dictionary API.
+  static const _demoNotes = <String, String>{
+    'ขอโทษ': 'กำมือหลวมๆ วางที่หน้าอก แล้วหมุนเป็นวงกลมตามเข็มนาฬิกา '
+        'สีหน้าแสดงความเสียใจประกอบด้วย',
+    'บ๊ายบาย': 'ยกมือระดับไหล่ หันฝ่ามือออก แล้วโบกไปมาเบาๆ',
+    'ดี': 'กำมือ ชูนิ้วโป้งขึ้น ยกไว้ระดับอก',
+    'แย่': 'กำมือ ชี้นิ้วโป้งลงพื้น ยกไว้ระดับอก',
+    'เร็ว': 'ชูนิ้วชี้ทั้งสองข้าง แล้วสะบัดไปข้างหน้าอย่างรวดเร็ว',
+  };
 
   static const _dictionaryCategories = <String, List<String>>{
     'ตัวเลข': [
@@ -233,10 +245,16 @@ class SimulatedLearnRepository implements LearnRepository {
     final best = previous == null || confidence > previous.bestConfidence
         ? confidence
         : previous.bestConfidence;
-    final passed =
-        (previous?.passed ?? false) || confidence >= exercise.passConfidence;
+    final correct = confidence >= exercise.passConfidence;
+    final passed = (previous?.passed ?? false) || correct;
     final row = LearnProgress(
-        exerciseId: exerciseId, bestConfidence: best, passed: passed);
+      exerciseId: exerciseId,
+      bestConfidence: best,
+      passed: passed,
+      // Mirrors the server: every try counts, correct ones are a subset.
+      attempts: (previous?.attempts ?? 0) + 1,
+      correctAttempts: (previous?.correctAttempts ?? 0) + (correct ? 1 : 0),
+    );
     _progress[exerciseId] = row;
     return row;
   }

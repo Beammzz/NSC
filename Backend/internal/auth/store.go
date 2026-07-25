@@ -182,6 +182,23 @@ func (s *Store) DeleteUser(id int64) error {
 	return nil
 }
 
+// UpdateUserRole updates the role of a user by ID and returns the updated User.
+func (s *Store) UpdateUserRole(id int64, role string) (User, error) {
+	now := time.Now().UnixMilli()
+	res, err := s.db.Exec(
+		`UPDATE users SET role = ?, updated_at = ? WHERE id = ?`,
+		role, now, id,
+	)
+	if err != nil {
+		return User{}, fmt.Errorf("updating user role: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return User{}, fmt.Errorf("user not found")
+	}
+	return s.GetUserByID(id)
+}
+
 // ---- password verification ----
 
 // CheckPassword compares a plaintext password against a bcrypt hash.

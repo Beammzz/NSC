@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -227,6 +228,89 @@ func TestProgressRoundTrip(t *testing.T) {
 		`{"exercise_id": `+jsonInt(ex.ID)+`, "confidence": 1.5}`)
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("confidence 1.5: status = %d, want 400", resp.StatusCode)
+	}
+
+	// A failed try is still an attempt, so the summary counts 2/1.
+	resp = doJSON(t, "POST", srv.URL+"/api/v1/learn/progress", userToken,
+		`{"exercise_id": `+jsonInt(ex.ID)+`, "confidence": 0.10}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("recording failed attempt: status = %d, want 200", resp.StatusCode)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&p); err != nil {
+		t.Fatalf("decoding progress: %v", err)
+	}
+	if p.Attempts != 2 || p.CorrectAttempts != 1 {
+		t.Errorf("attempts = %d/%d correct, want 2/1", p.Attempts, p.CorrectAttempts)
+	}
+}
+
+func TestSignNoteAndAnalyticsEndpoints(t *testing.T) {
+	srv, userToken, adminToken, store := testServer(t)
+	topics, _ := store.ListTopics(true)
+	ex := topics[0].Exercises[0]
+
+	// Admin writes the note the app shows on the example step.
+	resp := doJSON(t, "PUT", srv.URL+"/api/v1/admin/learn/signs/"+url.PathEscape(ex.Word)+"/note",
+		adminToken, `{"note": "ยกมือขึ้นที่ปาก"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("setting note: status = %d, want 200", resp.StatusCode)
+	}
+
+	// The app reads it back off the dictionary entry.
+	resp = doJSON(t, "GET", srv.URL+"/api/v1/learn/dictionary/"+url.PathEscape(ex.Word), userToken, "")
+	var sign Sign
+	if err := json.NewDecoder(resp.Body).Decode(&sign); err != nil {
+		t.Fatalf("decoding sign: %v", err)
+	}
+	if sign.Note != "ยกมือขึ้นที่ปาก" {
+		t.Errorf("note = %q, want ยกมือขึ้นที่ปาก", sign.Note)
+	}
+
+	// Note on a word with no dictionary row is a 404, not a silent create.
+	resp = doJSON(t, "PUT", srv.URL+"/api/v1/admin/learn/signs/"+url.PathEscape("ไม่มีคำนี้")+"/note",
+		adminToken, `{"note": "x"}`)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("note on missing sign: status = %d, want 404", resp.StatusCode)
+	}
+
+	// Learners cannot write notes or read analytics.
+	resp = doJSON(t, "PUT", srv.URL+"/api/v1/admin/learn/signs/"+url.PathEscape(ex.Word)+"/note",
+		userToken, `{"note": "x"}`)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("user setting note: status = %d, want 403", resp.StatusCode)
+	}
+	resp = doJSON(t, "GET", srv.URL+"/api/v1/admin/learn/analytics", userToken, "")
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("user reading analytics: status = %d, want 403", resp.StatusCode)
+	}
+
+	doJSON(t, "POST", srv.URL+"/api/v1/learn/progress", userToken,
+		`{"exercise_id": `+jsonInt(ex.ID)+`, "confidence": 0.92}`)
+	doJSON(t, "POST", srv.URL+"/api/v1/learn/progress", userToken,
+		`{"exercise_id": `+jsonInt(ex.ID)+`, "confidence": 0.20}`)
+
+	resp = doJSON(t, "GET", srv.URL+"/api/v1/admin/learn/analytics", adminToken, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("analytics: status = %d, want 200", resp.StatusCode)
+	}
+	var stats struct {
+		Exercises []ExerciseStats `json:"exercises"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&stats); err != nil {
+		t.Fatalf("decoding analytics: %v", err)
+	}
+	var found bool
+	for _, st := range stats.Exercises {
+		if st.ExerciseID != ex.ID {
+			continue
+		}
+		found = true
+		if st.Attempts != 2 || st.CorrectAttempts != 1 || st.Learners != 1 {
+			t.Errorf("analytics row = %+v, want 2 attempts / 1 correct / 1 learner", st)
+		}
+	}
+	if !found {
+		t.Errorf("exercise %d missing from analytics", ex.ID)
 	}
 }
 

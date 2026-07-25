@@ -20,15 +20,19 @@ import (
 type Handler struct {
 	ai       AIClient
 	record   func(*pb.Prediction)
+	composer SentenceComposer
 	upgrader websocket.Upgrader
 }
 
 // NewHandler bridges WS clients to the AI service. record may be nil; when
 // set it is invoked for every prediction (the webui's prediction log).
-func NewHandler(ai AIClient, record func(*pb.Prediction)) *Handler {
+// composer may be nil; when set, the words of each signing burst are composed
+// into a sentence at the end of a pause and pushed to the client.
+func NewHandler(ai AIClient, record func(*pb.Prediction), composer SentenceComposer) *Handler {
 	return &Handler{
-		ai:     ai,
-		record: record,
+		ai:       ai,
+		record:   record,
+		composer: composer,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  8192,
 			WriteBufferSize: 8192,
@@ -85,6 +89,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Sentence buffer: collects recognized words and composes them once the
+	// signer pauses (nil when no composer is wired).
+	sentences := newSentenceBuffer(ctx, h.composer, send)
+	defer sentences.close()
+
 	// Prediction pump: AI stream -> client.
 	go func() {
 		for {
@@ -100,6 +109,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if h.record != nil {
 				h.record(pred)
 			}
+			sentences.observe(pred)
 			if !send(newPredictionMessage(pred)) {
 				return
 			}
@@ -107,7 +117,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	send(newReadyMessage())
-	h.readLoop(ctx, conn, aiStream, send)
+	h.readLoop(ctx, conn, aiStream, sentences, send)
 
 	cancel()
 	<-writerDone
@@ -118,7 +128,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // readLoop forwards client frames to the AI stream until the connection
 // closes, the context is cancelled, or a fatal protocol error occurs.
-func (h *Handler) readLoop(ctx context.Context, conn *websocket.Conn, aiStream AIStream, send func(any) bool) {
+func (h *Handler) readLoop(ctx context.Context, conn *websocket.Conn, aiStream AIStream, sentences *sentenceBuffer, send func(any) bool) {
 	for {
 		if ctx.Err() != nil {
 			return
@@ -162,6 +172,7 @@ func (h *Handler) readLoop(ctx context.Context, conn *websocket.Conn, aiStream A
 				return
 			}
 		case typeReset:
+			sentences.reset()
 			if err := aiStream.Send(&pb.LandmarkFrame{Reset_: true}); err != nil {
 				send(newErrorMessage(httpapi.NewProblem(
 					http.StatusBadGateway, "AI service error", err.Error())))

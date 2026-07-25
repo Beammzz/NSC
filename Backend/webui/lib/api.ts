@@ -211,6 +211,86 @@ async function tryRefresh(): Promise<boolean> {
   }
 }
 
+// ---- LLM sentence composition API (admin) ----
+// The backend buffers the words of one signing burst and composes them into a
+// sentence after the signer pauses; these endpoints configure and audit that.
+
+export type LLMSettings = {
+  enabled: boolean;
+  endpoint: string;
+  // Only the last 4 characters of the stored key, e.g. "••••abcd".
+  api_key_masked: string;
+  api_key_set: boolean;
+  model: string;
+  system_prompt: string;
+  silence_ms: number;
+  max_words: number;
+  timeout_ms: number;
+  temperature: number;
+  auto_clean_max_logs: number;
+  default_system_prompt: string;
+  default_endpoint: string;
+  default_model: string;
+  logs_total: number;
+};
+
+// Fields left undefined keep their stored value. Sending api_key: '' clears
+// the key; never send api_key_masked back — the server rejects it with a 400.
+export type LLMSettingsPatch = {
+  enabled?: boolean;
+  endpoint?: string;
+  api_key?: string;
+  model?: string;
+  system_prompt?: string;
+  silence_ms?: number;
+  max_words?: number;
+  timeout_ms?: number;
+  temperature?: number;
+  auto_clean_max_logs?: number;
+};
+
+export type LLMLogRecord = {
+  id: number;
+  created_ms: number;
+  words: string[];
+  sentence: string;
+  raw: string;
+  model: string;
+  latency_ms: number;
+  ok: boolean;
+  fallback: boolean;
+  error: string;
+};
+
+export type LLMLogsPage = { total: number; records: LLMLogRecord[] };
+
+export function fetchLLMSettings(): Promise<LLMSettings> {
+  return getJSON<LLMSettings>('/api/v1/admin/llm/settings');
+}
+
+export function putLLMSettings(patch: LLMSettingsPatch): Promise<LLMSettings> {
+  return sendJSON<LLMSettings>('PUT', '/api/v1/admin/llm/settings', patch);
+}
+
+export function fetchLLMLogs(params: {
+  limit?: number;
+  offset?: number;
+}): Promise<LLMLogsPage> {
+  const q = new URLSearchParams();
+  if (params.limit !== undefined) q.set('limit', String(params.limit));
+  if (params.offset) q.set('offset', String(params.offset));
+  const qs = q.toString();
+  return getJSON<LLMLogsPage>(`/api/v1/admin/llm/logs${qs ? `?${qs}` : ''}`);
+}
+
+export function clearLLMLogs(): Promise<void> {
+  return sendJSON<void>('DELETE', '/api/v1/admin/llm/logs');
+}
+
+export function formatDateTime(ms: number): string {
+  return new Date(ms).toLocaleString(undefined, { hour12: false });
+}
+
 // ---- Learning content API (admin) ----
 
 export type LearnExercise = {
@@ -235,7 +315,22 @@ export type LearnTopic = {
 export type LearnSign = {
   word: string;
   category: string;
+  // Admin-written explanation the app shows on the example step before
+  // practice; empty string when nobody has written one.
+  note: string;
   has_animation: boolean;
+};
+
+// Per-exercise rollup across all learners, for the Learn page analytics table.
+export type LearnExerciseStats = {
+  exercise_id: number;
+  word: string;
+  topic_title: string;
+  attempts: number;
+  correct_attempts: number;
+  learners: number;
+  learners_passed: number;
+  avg_confidence: number;
 };
 
 // One landmark of an avatar keypoint frame (raw normalized image coords 0..1).
@@ -333,6 +428,22 @@ export function deleteSign(word: string): Promise<void> {
   return sendJSON<void>('DELETE', `/api/v1/admin/learn/signs/${encodeURIComponent(word)}`);
 }
 
+// setSignNote writes the note shown on the app's example step. An empty string
+// clears it. The word must already exist in the dictionary (404 otherwise).
+export function setSignNote(word: string, note: string): Promise<{ word: string; note: string }> {
+  return sendJSON<{ word: string; note: string }>(
+    'PUT',
+    `/api/v1/admin/learn/signs/${encodeURIComponent(word)}/note`,
+    { note },
+  );
+}
+
+export function fetchLearnAnalytics(): Promise<LearnExerciseStats[]> {
+  return getJSON<{ exercises: LearnExerciseStats[] }>('/api/v1/admin/learn/analytics').then(
+    (d) => d.exercises,
+  );
+}
+
 // uploadSignRecording POSTs a recorded clip as multipart (field "recording");
 // the Go server execs the Python extractor and stores the keypoint frames. The
 // FormData is rebuilt per attempt so the one 401 refresh-retry can resend it.
@@ -392,6 +503,10 @@ export async function deleteUser(id: number): Promise<void> {
     }
   }
   if (!resp.ok) throw await asError(resp);
+}
+
+export function updateUserRole(id: number, role: string): Promise<UserRecord> {
+  return sendJSON<UserRecord>('PUT', `/api/v1/admin/users/${id}/role`, { role });
 }
 
 // ---- Dictionary Reindexing & Idle Detection ----

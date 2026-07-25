@@ -2,6 +2,7 @@ package stream
 
 import (
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/httpapi"
+	"gitea.harumi.dev/Harumi/NSC/backend/internal/llm"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/pb"
 )
 
@@ -15,6 +16,7 @@ const (
 	typeReset         = "reset"
 	typeReady         = "ready"
 	typePrediction    = "prediction"
+	typeSentence      = "sentence"
 	typeError         = "error"
 )
 
@@ -51,6 +53,18 @@ type predictionMessage struct {
 	InferenceMicros int64       `json:"inference_micros"`
 }
 
+// sentenceMessage carries one composed sentence at the end of a signing
+// burst; the client speaks it through on-device TTS. `fallback` is true when
+// the words were merely joined because the LLM was unconfigured or failed.
+type sentenceMessage struct {
+	SchemaVersion int      `json:"schema_version"`
+	Type          string   `json:"type"`
+	Sentence      string   `json:"sentence"`
+	Words         []string `json:"words"`
+	Fallback      bool     `json:"fallback"`
+	LatencyMS     int64    `json:"latency_ms"`
+}
+
 type errorMessage struct {
 	SchemaVersion int             `json:"schema_version"`
 	Type          string          `json:"type"`
@@ -59,6 +73,20 @@ type errorMessage struct {
 
 func newReadyMessage() readyMessage {
 	return readyMessage{SchemaVersion: schemaVersion, Type: typeReady}
+}
+
+func newSentenceMessage(words []string, res llm.Result) sentenceMessage {
+	if words == nil {
+		words = []string{}
+	}
+	return sentenceMessage{
+		SchemaVersion: schemaVersion,
+		Type:          typeSentence,
+		Sentence:      res.Sentence,
+		Words:         words,
+		Fallback:      res.Fallback,
+		LatencyMS:     res.LatencyMS,
+	}
 }
 
 func newErrorMessage(p httpapi.Problem) errorMessage {

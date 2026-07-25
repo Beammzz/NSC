@@ -4,8 +4,9 @@ import 'package:go_router/go_router.dart';
 import 'package:signmind/core/theme/app_theme.dart';
 import 'package:signmind/features/learn/domain/models/learn_models.dart';
 import 'package:signmind/features/learn/presentation/providers/learn_provider.dart';
-import 'package:signmind/features/learn/presentation/screens/exercise_practice_screen.dart';
+import 'package:signmind/features/learn/presentation/screens/sign_example_screen.dart';
 import 'package:signmind/features/learn/presentation/widgets/sign_avatar.dart';
+import 'package:signmind/features/settings/presentation/providers/settings_provider.dart';
 
 /// Learn tab: a Duolingo-style exercise roadmap (topics of
 /// perform-the-sign exercises) and the TSL dictionary.
@@ -39,7 +40,7 @@ class _LearnScreenState extends ConsumerState<LearnScreen> {
               ),
               const SizedBox(height: 6),
               Text(
-                'ฝึกท่าทางตามแบบฝึกหัด หรือค้นหาคำศัพท์จากคลัง',
+                'ดูตัวอย่างท่าแล้วฝึกทำตาม หรือค้นหาคำศัพท์จากคลัง',
                 style: TextStyle(
                   fontSize: 14,
                   color: context.textMutedColor.withAlpha(220),
@@ -107,7 +108,7 @@ class _ModeToggle extends StatelessWidget {
       ),
       child: Row(
         children: [
-          buildSegment('แบบฝึกหัด', 0),
+          buildSegment('เรียนรู้', 0),
           buildSegment('คลังคำศัพท์', 1),
         ],
       ),
@@ -131,14 +132,14 @@ class _RoadmapView extends ConsumerWidget {
         child: CircularProgressIndicator(color: AppTheme.primaryAccent),
       ),
       error: (err, _) => _ErrorRetry(
-        message: 'โหลดแบบฝึกหัดไม่สำเร็จ',
+        message: 'โหลดบทเรียนไม่สำเร็จ',
         onRetry: () => ref.invalidate(learnTopicsProvider),
       ),
       data: (topics) {
         if (topics.isEmpty) {
           return Center(
             child: Text(
-              'ยังไม่มีแบบฝึกหัด',
+              'ยังไม่มีบทเรียน',
               style: TextStyle(color: context.textMutedColor),
             ),
           );
@@ -303,11 +304,13 @@ class _TopicNode extends ConsumerWidget {
                           _ExerciseChip(
                             exercise: exercise,
                             passed: progress[exercise.id]?.passed ?? false,
+                            // Every exercise starts on the example step; the
+                            // example screen hands off to practice.
                             onTap: () => context.push(
-                              '/learn/practice',
-                              extra: PracticeArgs(
+                              '/learn/example',
+                              extra: ExampleArgs(
+                                topic: topic,
                                 exercise: exercise,
-                                topicTitle: topic.title,
                               ),
                             ),
                           ),
@@ -584,42 +587,13 @@ class _SignDetailAvatar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final detail = ref.watch(signDetailProvider(word));
-    final style = ref.watch(signAvatarStyleProvider);
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SignAvatar(
-          word: word,
-          frames: detail.value?.keypointFrames,
-          style: style,
-        ),
-        const SizedBox(height: 12),
-        SegmentedButton<SignAvatarStyle>(
-          segments: const [
-            ButtonSegment(
-              value: SignAvatarStyle.cartoon,
-              icon: Icon(Icons.face_retouching_natural, size: 18),
-              label: Text('ตัวการ์ตูน'),
-            ),
-            ButtonSegment(
-              value: SignAvatarStyle.skeleton,
-              icon: Icon(Icons.scatter_plot, size: 18),
-              label: Text('จุดคีย์พอยต์'),
-            ),
-          ],
-          selected: {style},
-          showSelectedIcon: false,
-          style: const ButtonStyle(
-            visualDensity: VisualDensity.compact,
-            textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 12)),
-          ),
-          onSelectionChanged: (selection) {
-            ref
-                .read(signAvatarStyleProvider.notifier)
-                .setStyle(selection.first);
-          },
-        ),
-      ],
+    // Style lives in Settings ("อวาตาร์แบบการ์ตูน"), not here.
+    final cartoon =
+        ref.watch(settingsProvider.select((s) => s.cartoonAvatar));
+    return SignAvatar(
+      word: word,
+      frames: detail.value?.keypointFrames,
+      style: cartoon ? SignAvatarStyle.cartoon : SignAvatarStyle.skeleton,
     );
   }
 }

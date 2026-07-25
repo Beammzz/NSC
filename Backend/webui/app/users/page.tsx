@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, FormEvent } from 'react';
-import { fetchUsers, createUser, deleteUser, UserRecord, formatTime } from '../../lib/api';
+import { fetchUsers, createUser, deleteUser, updateUserRole, UserRecord, formatTime } from '../../lib/api';
 
 export default function UsersPage() {
   const [users, setUsers] = useState<UserRecord[]>([]);
@@ -16,8 +16,9 @@ export default function UsersPage() {
   const [creating, setCreating] = useState(false);
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Delete confirmation state.
+  // Action loading / delete state.
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const [updatingRoleId, setUpdatingRoleId] = useState<number | null>(null);
 
   async function loadUsers() {
     try {
@@ -65,6 +66,22 @@ export default function UsersPage() {
       const msg = err instanceof Error ? err.message : String(err);
       setNotice({ type: 'error', text: `Failed to delete user: ${msg}` });
       setConfirmDelete(null);
+    }
+  }
+
+  async function handleToggleRole(u: UserRecord) {
+    const nextRole = u.role === 'admin' ? 'user' : 'admin';
+    setUpdatingRoleId(u.id);
+    setNotice(null);
+    try {
+      await updateUserRole(u.id, nextRole);
+      setNotice({ type: 'success', text: `Role for ${u.email} changed to ${nextRole}.` });
+      await loadUsers();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setNotice({ type: 'error', text: `Failed to change role: ${msg}` });
+    } finally {
+      setUpdatingRoleId(null);
     }
   }
 
@@ -158,10 +175,16 @@ export default function UsersPage() {
                   <td>{u.id}</td>
                   <td className="word">{u.email}</td>
                   <td>
-                    <span className={`chip ${u.role === 'admin' ? 'warning' : 'info'}`}>
+                    <button
+                      type="button"
+                      className={`chip ${u.role === 'admin' ? 'warning' : 'info'} role-chip-btn`}
+                      onClick={() => handleToggleRole(u)}
+                      disabled={updatingRoleId === u.id}
+                      title={`Click to change role to ${u.role === 'admin' ? 'user' : 'admin'}`}
+                    >
                       <span className="dot" />
-                      {u.role}
-                    </span>
+                      {updatingRoleId === u.id ? '...' : u.role}
+                    </button>
                   </td>
                   <td>{formatTime(u.created_at)}</td>
                   <td>

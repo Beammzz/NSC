@@ -18,6 +18,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/config"
+	"gitea.harumi.dev/Harumi/NSC/backend/internal/llm"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/pb"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/predlog"
 )
@@ -89,13 +90,19 @@ func (f *fakeAI) StreamLogs(ctx context.Context, in *pb.StreamLogsRequest, opts 
 
 func testServer(t *testing.T, ai *fakeAI, env string) (*httptest.Server, *predlog.Store) {
 	t.Helper()
-	store, err := predlog.Open(filepath.Join(t.TempDir(), "predictions.db"))
+	dir := t.TempDir()
+	store, err := predlog.Open(filepath.Join(dir, "predictions.db"))
 	if err != nil {
 		t.Fatalf("opening store: %v", err)
 	}
 	t.Cleanup(func() { store.Close() })
+	llmStore, err := llm.Open(filepath.Join(dir, "llm.db"))
+	if err != nil {
+		t.Fatalf("opening llm store: %v", err)
+	}
+	t.Cleanup(func() { llmStore.Close() })
 	mux := http.NewServeMux()
-	New(ai, store, config.Config{Env: env}).Register(mux)
+	New(ai, store, llmStore, config.Config{Env: env}).Register(mux)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv, store
@@ -424,3 +431,100 @@ func TestSetSettingsAutoCleanMax(t *testing.T) {
 	}
 }
 
+
+// ---- LLM settings & logs ----
+
+func TestLLMSettingsMasksTheAPIKey(t *testing.T) {
+	srv, _ := testServer(t, &fakeAI{}, config.EnvDev)
+
+	put := func(body string) *http.Response {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodPut,
+			srv.URL+"/api/v1/admin/llm/settings", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+
+	var saved llmSettingsJSON
+	decodeJSON(t, put(`{"api_key":"sk-secret-abcd","enabled":true}`), &saved)
+	if saved.APIKeyMasked != "••••abcd" {
+		t.Errorf("APIKeyMasked = %q, want ••••abcd", saved.APIKeyMasked)
+	}
+	if !saved.APIKeySet || !saved.Enabled {
+		t.Errorf("api_key_set=%v enabled=%v, want both true", saved.APIKeySet, saved.Enabled)
+	}
+
+	// A GET must never leak the clear-text key in any field.
+	resp, err := http.Get(srv.URL + "/api/v1/admin/llm/settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "sk-secret-abcd") {
+		t.Fatalf("GET leaked the API key: %s", raw)
+	}
+}
+
+func TestLLMSettingsRejectsTheEchoedMask(t *testing.T) {
+	srv, _ := testServer(t, &fakeAI{}, config.EnvDev)
+	send := func(body string) int {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodPut,
+			srv.URL+"/api/v1/admin/llm/settings", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := send(`{"api_key":"sk-secret-abcd"}`); code != http.StatusOK {
+		t.Fatalf("saving a real key returned %d, want 200", code)
+	}
+	if code := send(`{"api_key":"••••abcd"}`); code != http.StatusBadRequest {
+		t.Fatalf("echoing the mask returned %d, want 400", code)
+	}
+}
+
+func TestLLMLogsListAndClear(t *testing.T) {
+	srv, _ := testServer(t, &fakeAI{}, config.EnvDev)
+
+	resp, err := http.Get(srv.URL + "/api/v1/admin/llm/logs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var page struct {
+		Total   int64           `json:"total"`
+		Records []llm.LogRecord `json:"records"`
+	}
+	decodeJSON(t, resp, &page)
+	if page.Total != 0 || len(page.Records) != 0 {
+		t.Fatalf("expected an empty log, got %+v", page)
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, srv.URL+"/api/v1/admin/llm/logs", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	del, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	del.Body.Close()
+	if del.StatusCode != http.StatusNoContent {
+		t.Fatalf("DELETE returned %d, want 204", del.StatusCode)
+	}
+}

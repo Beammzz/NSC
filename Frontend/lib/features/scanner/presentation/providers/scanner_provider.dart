@@ -12,6 +12,7 @@ class ScannerNotifier extends Notifier<ScannerState> {
   StreamSubscription<RawLandmarkFrame>? _frameSub;
   StreamSubscription<TranslationFrame>? _streamSub;
   StreamSubscription<ConnectionStatus>? _statusSub;
+  StreamSubscription<ComposedSentence>? _sentenceSub;
   StreamSubscription<bool>? _ttsSub;
   DateTime _lastCosmeticWrite = DateTime.fromMillisecondsSinceEpoch(0);
   ScannerState? _savedState;
@@ -29,6 +30,7 @@ class ScannerNotifier extends Notifier<ScannerState> {
     _frameSub?.cancel();
     _streamSub?.cancel();
     _statusSub?.cancel();
+    _sentenceSub?.cancel();
     _ttsSub?.cancel();
 
     _frameSub = landmarkService.frameStream.listen((frame) {
@@ -56,7 +58,11 @@ class ScannerNotifier extends Notifier<ScannerState> {
         }
       }
 
-      if (wordAdded && ref.read(settingsProvider).autoSpeak) {
+      // When the server composes sentences it also decides when one ended, so
+      // speaking each word here would talk over the sentence that follows.
+      if (wordAdded &&
+          !streamService.supportsSentences &&
+          ref.read(settingsProvider).autoSpeak) {
         ref.read(ttsServiceProvider).speak(frame.word);
       }
 
@@ -89,6 +95,22 @@ class ScannerNotifier extends Notifier<ScannerState> {
       state = newState;
     });
 
+    // A composed sentence closes the burst the word buffer was collecting:
+    // the server already cleared its own buffer, so clear ours and let the
+    // finished sentence be what the user sees and hears.
+    _sentenceSub = streamService.sentenceStream.listen((composed) {
+      if (!state.isScanning) return;
+      final newState = state.copyWith(
+        sentence: [],
+        composedSentence: composed.text,
+      );
+      _savedState = newState;
+      state = newState;
+      if (ref.read(settingsProvider).autoSpeak) {
+        ref.read(ttsServiceProvider).speak(composed.text);
+      }
+    });
+
     _statusSub = streamService.connectionStatus.listen((status) {
       final newState = state.copyWith(connectionStatus: status);
       _savedState = newState;
@@ -105,6 +127,7 @@ class ScannerNotifier extends Notifier<ScannerState> {
       _frameSub?.cancel();
       _streamSub?.cancel();
       _statusSub?.cancel();
+      _sentenceSub?.cancel();
       _ttsSub?.cancel();
       landmarkService.stop();
       streamService.stop();
@@ -139,17 +162,24 @@ class ScannerNotifier extends Notifier<ScannerState> {
   }
 
   void clearSentence() {
-    final newState = state.copyWith(sentence: []);
+    final newState = state.copyWith(sentence: [], composedSentence: '');
     _savedState = newState;
     state = newState;
   }
 
+  /// Text the speak button reads: the composed sentence once the server has
+  /// produced one, otherwise the words buffered so far.
+  String get spokenText => state.composedSentence.isNotEmpty
+      ? state.composedSentence
+      : state.sentence.join(' ');
+
   Future<void> speakSentence() async {
-    if (state.sentence.isEmpty || state.isSpeaking) return;
+    final text = spokenText;
+    if (text.isEmpty || state.isSpeaking) return;
     var newState = state.copyWith(isSpeaking: true);
     _savedState = newState;
     state = newState;
-    await ref.read(ttsServiceProvider).speak(state.sentence.join(' '));
+    await ref.read(ttsServiceProvider).speak(text);
     newState = state.copyWith(isSpeaking: false);
     _savedState = newState;
     state = newState;

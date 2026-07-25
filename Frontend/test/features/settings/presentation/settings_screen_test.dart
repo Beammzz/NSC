@@ -189,5 +189,19 @@ void main() {
 
     expect(container.read(settingsProvider).cameraResolution, '480p');
   });
+
+  test('cartoon avatar defaults on and the toggle persists', () async {
+    SharedPreferences.setMockInitialValues({});
+    final container = await makeContainer();
+    addTearDown(container.dispose);
+
+    expect(container.read(settingsProvider).cartoonAvatar, isTrue);
+
+    container.read(settingsProvider.notifier).toggleCartoonAvatar(false);
+    expect(container.read(settingsProvider).cartoonAvatar, isFalse);
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getBool('settings.cartoonAvatar'), isFalse);
+  });
 }
 

@@ -19,6 +19,7 @@ import (
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/config"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/keypoint"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/learn"
+	"gitea.harumi.dev/Harumi/NSC/backend/internal/llm"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/pb"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/predlog"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/stream"
@@ -50,6 +51,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("opening prediction log: %v", err)
 	}
+
+	// LLM sentence composition: settings + request log share the same DB.
+	llmStore, err := llm.OpenWith(db)
+	if err != nil {
+		log.Fatalf("opening llm store: %v", err)
+	}
+	llmService := llm.NewService(llmStore)
 
 	// ---- auth ----
 	authStore, err := auth.OpenStore(db)
@@ -94,7 +102,7 @@ func main() {
 	// The data endpoints require a valid JWT (any role): the Flutter client
 	// sends "Authorization: Bearer" — on the WS handshake for /stream.
 	mux := http.NewServeMux()
-	mux.Handle("/api/v1/stream", requireAuth(stream.NewHandler(aiClient, record)))
+	mux.Handle("/api/v1/stream", requireAuth(stream.NewHandler(aiClient, record, llmService)))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -103,7 +111,7 @@ func main() {
 	authHandler.Register(mux, adminMW)
 
 	// Admin routes — protected by JWT + admin role.
-	adminHandler := admin.New(aiClient.Raw(), store, cfg)
+	adminHandler := admin.New(aiClient.Raw(), store, llmStore, cfg)
 	adminHandler.RegisterProtected(mux, adminMW)
 
 	// Learning tab: dictionary, exercise roadmap, progress (user routes)

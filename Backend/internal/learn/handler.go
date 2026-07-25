@@ -40,14 +40,18 @@ import (
 //	DELETE /api/v1/admin/learn/exercises/{id} delete exercise
 //	GET    /api/v1/admin/learn/signs               all dictionary entries (no frames)
 //	POST   /api/v1/admin/learn/signs               upsert a sign (word + category)
+//	PUT    /api/v1/admin/learn/signs/{word}/note   set the example-step note
 //	POST   /api/v1/admin/learn/signs/{word}/recording  extract keypoints from an uploaded clip
 //	POST   /api/v1/admin/learn/signs/import-thsl   import sign from th-sl.com link
 //	DELETE /api/v1/admin/learn/signs/{word}        delete a sign
+//	GET    /api/v1/admin/learn/analytics           per-exercise attempt/correct rollup
 const (
 	// Multipart parse memory threshold for a sign recording; larger spools to disk.
 	recordingMemoryBytes = 8 << 20
 	// Hard cap on a recording upload.
 	maxRecordingBytes = 100 << 20
+	// Hard cap on an admin-written example note.
+	maxNoteBytes = 4000
 	// Budget for the whole extraction (upload copy + Python MediaPipe pass).
 	recordingTimeout = 90 * time.Second
 )
@@ -94,7 +98,9 @@ func (h *Handler) RegisterProtected(mux *http.ServeMux, userMW, adminMW func(htt
 
 	mux.Handle("GET /api/v1/admin/learn/signs", admin(h.adminSigns))
 	mux.Handle("POST /api/v1/admin/learn/signs", admin(h.upsertSign))
+	mux.Handle("PUT /api/v1/admin/learn/signs/{word}/note", admin(h.setSignNote))
 	mux.Handle("POST /api/v1/admin/learn/signs/{word}/recording", admin(h.uploadSignRecording))
+	mux.Handle("GET /api/v1/admin/learn/analytics", admin(h.analytics))
 	mux.Handle("POST /api/v1/admin/learn/signs/import-thsl", admin(h.importFromThsl))
 	mux.Handle("DELETE /api/v1/admin/learn/signs/{word}", admin(h.deleteSign))
 }
@@ -301,6 +307,49 @@ func (h *Handler) upsertSign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"word": body.Word, "category": body.Category})
+}
+
+// setSignNote stores the admin-written note the app shows on the example step
+// before practice. An empty note clears it.
+func (h *Handler) setSignNote(w http.ResponseWriter, r *http.Request) {
+	word := strings.TrimSpace(r.PathValue("word"))
+	if word == "" {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusBadRequest, "Invalid sign", "word is required"))
+		return
+	}
+	var body struct {
+		Note string `json:"note"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusBadRequest, "Malformed note body", err.Error()))
+		return
+	}
+	if len(body.Note) > maxNoteBytes {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusBadRequest, "Note too long",
+			fmt.Sprintf("note must be at most %d bytes", maxNoteBytes)))
+		return
+	}
+	if err := h.store.SetSignNote(word, body.Note); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"word": NormalizeWord(word),
+		"note": strings.TrimSpace(body.Note),
+	})
+}
+
+// analytics returns the per-exercise attempt/correct rollup across all users.
+func (h *Handler) analytics(w http.ResponseWriter, r *http.Request) {
+	stats, err := h.store.ListExerciseStats()
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"exercises": stats})
 }
 
 // uploadSignRecording extracts avatar keypoints from an uploaded clip and

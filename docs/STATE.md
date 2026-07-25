@@ -477,6 +477,10 @@ Completed app icon update and installation across both native mobile launcher an
   themselves, uncommitted). Scan-reduction owner + mechanism + what "it" refers to NOT yet
   confirmed — asked user 2026-07-25.
 
+- 2026-07-25 user (avatar style toggle): "I said the option to change between cartoon and keypoint
+  need to be in the setting page not in the dictionary." Toggle belongs in Settings, not the
+  dictionary sign sheet.
+
 ## Open items
 - Medium/minor review findings deliberately NOT in scope: Flutter token refresh/persistence,
   admin-signup cookie footgun, dangling CountSignupsByIP comment, >72-byte password 500,
@@ -501,9 +505,13 @@ BUILT:
    are multiples of shoulder width. New _ViewFit: uniform scale+offset over the bbox of ALL
    frames (+ reserved torso room in cartoon) — recorded coords span the camera frame, so the old
    raw x*width mapping ran off the widget edges in both styles.
-2. learn_provider.dart: signAvatarStyleProvider (NotifierProvider — riverpod 3 removed
-   StateProvider), in memory, defaults cartoon. learn_screen.dart _SignDetailAvatar gains a
-   SegmentedButton (ตัวการ์ตูน / จุดคีย์พอยต์).
+2. Style switch: FIRST built as a SegmentedButton in the dictionary sign sheet; user rejected the
+   placement ("need to be in the setting page not in the dictionary"), so it MOVED to Settings ->
+   การแสดงผลและธีม as SwitchListTile "อวาตาร์แบบการ์ตูน (Cartoon Avatar)". Persisted:
+   AppSettings.cartoonAvatar (default true, pref key settings.cartoonAvatar, toggleCartoonAvatar).
+   learn_screen _SignDetailAvatar watches settingsProvider.select((s) => s.cartoonAvatar); the
+   in-memory signAvatarStyleProvider that briefly lived in learn_provider.dart is deleted.
+   Test: settings_screen_test "cartoon avatar defaults on and the toggle persists".
 3. webui dictionary page.tsx: same cartoon renderer ported; renderAvatarFrame signature is now
    (ctx, frames, index, size) because held hands and the fit need the whole clip. Skeleton style
    is Flutter-only; the sparse-frame dot fallback stayed.
@@ -537,3 +545,75 @@ hands+7-pose recognizer; never silently guess "loves" vs "doesn't love".
 NOTE: user is expanding seed.go (adds ไม่, ที่ไหน/อย่างไร/อะไร) which partly closes the wh/negator
 gaps IF those signs get recorded+trained; the 51 pairs were built on the pre-expansion 150-word set
 (additive only, no removals — existing pairs stay in-vocab).
+
+## Goal (2026-07-25 PM): LLM sentence composition — BUILT, uncommitted
+User: "turn words into sentences … 'ฉัน รัก เธอ' -> 'ฉันรักเธอ' and then do the tts after it detect a
+long pause"; plus "inside the LLM page in admin UI have LLM logs. and settings page … edit system
+prompt, openai-compatible endpoint, API key".
+DECISIONS (user answered 4 questions this session, all recommended options): full scope
+(backend + admin UI + Flutter); sentence ends on a server-side silence timeout; delivery via a new
+WS `sentence` message on /api/v1/stream (NOT the previously planned POST /api/v1/translate/refine);
+API key in SQLite, admin-editable, masked on read (NOT env-only as the earlier plan assumed).
+BUILT:
+1. Backend/internal/llm — store.go (llm_settings + llm_logs tables, partial-patch settings with
+   clamping, auto-clean prune) and service.go (OpenAI-compatible /chat/completions, Typhoon defaults,
+   output validation, RawJoin fallback). Compose NEVER errors: every failure path returns the joined
+   glosses and logs why. Validation rejects empty/fenced/quoted/multi-line/runaway output and any
+   reply that dropped a recognized word (the research's in-vocab hard filter).
+2. Backend/internal/stream/sentence.go — per-connection word buffer. Dedupes the repeated top-1 of
+   one gesture, ignores idle/uncertain windows, composes on the silence timer or at max_words,
+   `reset` drops the buffer without composing. NewHandler gained a third arg (SentenceComposer).
+3. admin: GET/PUT /api/v1/admin/llm/settings, GET/DELETE /api/v1/admin/llm/logs. admin.New gained an
+   *llm.Store arg. Key masked as ••••abcd; a PUT echoing the mask is a 400.
+4. webui /llm page (tabs LLM Logs + Settings), nav "LLM Model" no longer "Coming soon",
+   globals.css got textarea/password/url input styling.
+5. Flutter: ComposedSentence model + ScannerState.composedSentence; parseServerSentence;
+   TslStreamService.sentenceStream/supportsSentences; scanner_provider speaks the composed sentence
+   and STOPS per-word autoSpeak when the server composes (simulated stream keeps word-by-word).
+Verified: go vet ./... + go test ./... all ok; npm run build clean (/llm 4.03 kB); flutter analyze
+clean; flutter test 63/63 (baseline 61).
+RUNTIME: user ran the app 2026-07-25 and reported "the app run as expected" — first real-world
+confirmation of the pipeline. Not covered by that report: whether a Typhoon key was configured, so
+it may have exercised only the RawJoin fallback path.
+UNVERIFIED: no live Typhoon call observed from this side — every LLM test uses an httptest stub, so
+the real endpoint, model id, and API key have never been exercised end-to-end in a run we measured.
+DEFERRED (not built, deliberately): retry on 429/5xx (one attempt then fallback, to protect the
+1.5s end-to-end latency target); gloss autocorrect (would violate the in-vocab filter — needs its
+own decision); Coach AI + AI Conversation stay out per the 2026-07-24 constraint.
+
+## Goal (2026-07-25): Learn tab — "แบบฝึกหัด" -> "เรียนรู้", 3-step exercise flow (done, uncommitted)
+User: rename the tab and rework it so each exercise (1) shows the dictionary example plus a note
+the user writes by hand in the Admin UI, (2) then goes to the practice step with the accuracy
+threshold, (3) then reports "how many attempt out of the correct" for analytics.
+DECISIONS (user-answered, 2026-07-25): note lives on the DICTIONARY SIGN (one per word, reused by
+every exercise using it); an attempt is an EXPLICIT try button with a bounded 3s capture window;
+the summary is PER TOPIC; analytics visible to BOTH the learner in-app and the Admin UI.
+SCHEMA — additive only, no migration, dictionary rows never rewritten (honors the 2026-07-25
+"dont change the dictionary database" constraint): two NEW tables joined on read, `learn_sign_notes
+(word PK, note)` and append-only `learn_attempts(id, user_id, exercise_id, confidence, passed,
+created_ms)`. `learn_signs`/`learn_progress` are untouched, so the live data/predictions.db needs
+no ALTER; `seed.go` was not edited.
+BUILT:
+1. Backend `internal/learn`: Sign.Note + LEFT JOIN in ListSigns/GetSign; SetSignNote (trim, empty
+   clears the row, ErrNotFound when the word has no dictionary row, note deleted with the sign);
+   RecordAttempt also appends to learn_attempts; Progress gains attempts/correct_attempts via
+   `progressSelect`; new ListExerciseStats rollup. Routes: PUT /api/v1/admin/learn/signs/{word}/note
+   (max 4000 bytes) and GET /api/v1/admin/learn/analytics.
+2. Flutter: 3 routes over the tab shell — /learn/example (new sign_example_screen.dart: avatar +
+   note + "เริ่มฝึกทำท่า"), /learn/practice (rewritten: explicit try button, 3s window, posts the
+   window's best confidence — 0.0 when the word never appeared, so misses count), /learn/summary
+   (new topic_summary_screen.dart: correct/attempts + accuracy + per-word rows). PracticeArgs now
+   carries the whole LearnTopic (was topicTitle) so the screen can detect topic completion.
+   Segment label -> "เรียนรู้"; SimulatedLearnRepository tallies attempts and ships demo notes.
+3. WebUI: LearnSign.note + setSignNote + fetchLearnAnalytics in lib/api.ts; inline note textarea
+   column on /dictionary; "Practice Analytics" table on /learn.
+VERIFIED 2026-07-25: go vet ./... clean; go test ./... all ok (learn 0.140s, 5 new/extended tests
+named PASS); flutter analyze "No issues found!"; flutter test "All tests passed!" (65, was 63);
+npm run build exported 13 routes. Live probe on a throwaway :8099 + scratch DB (the user's server
+on :8080 was left running): PUT note -> 200 and the Thai note reads back intact off
+GET /learn/dictionary/{word}; three POSTs (0.92, 0.10, 0.0) -> attempts 1,2,3 with
+correct_attempts stuck at 1; analytics -> attempts 3 / correct 1 / learners 1 / avg 0.34.
+NOTE: an earlier probe showed the note as "?????" — that was Git Bash mangling a non-ASCII
+command-line argument, not the server; resending the same body from a UTF-8 file round-tripped.
+DOX synced: Backend/AGENTS.md (routes, attempt-log/note tables, webui sections), Frontend/AGENTS.md
+(learn feature row, attempt semantics), landing_screen.dart per the Feature Registry Sync Rule.

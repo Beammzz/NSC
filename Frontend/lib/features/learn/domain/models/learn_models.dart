@@ -70,10 +70,12 @@ class LearnTopic {
 
 /// One dictionary entry. [keypointFrames] (frames of avatar landmark
 /// points) is only populated by the detail fetch and may be null — the UI
-/// then renders a procedural placeholder animation.
+/// then renders a procedural placeholder animation. [note] is the
+/// admin-written explanation shown on the example step; empty when unset.
 class DictionarySign {
   final String word;
   final String category;
+  final String note;
   final bool hasAnimation;
   final List<List<LandmarkPoint>>? keypointFrames;
 
@@ -81,6 +83,7 @@ class DictionarySign {
     required this.word,
     required this.category,
     required this.hasAnimation,
+    this.note = '',
     this.keypointFrames,
   });
 
@@ -88,6 +91,7 @@ class DictionarySign {
     return DictionarySign(
       word: json['word'] as String? ?? '',
       category: json['category'] as String? ?? '',
+      note: json['note'] as String? ?? '',
       hasAnimation: json['has_animation'] == true,
       keypointFrames: parseKeypointFrames(json['keypoint_frames']),
     );
@@ -115,15 +119,21 @@ List<List<LandmarkPoint>>? parseKeypointFrames(dynamic raw) {
 
 /// The caller's best result on one exercise. `passed` is derived
 /// server-side from the exercise's threshold and never regresses.
+/// [attempts]/[correctAttempts] count every logged try (failures included)
+/// and feed the end-of-topic summary.
 class LearnProgress {
   final int exerciseId;
   final double bestConfidence;
   final bool passed;
+  final int attempts;
+  final int correctAttempts;
 
   const LearnProgress({
     required this.exerciseId,
     required this.bestConfidence,
     required this.passed,
+    this.attempts = 0,
+    this.correctAttempts = 0,
   });
 
   factory LearnProgress.fromJson(Map<String, dynamic> json) {
@@ -131,6 +141,8 @@ class LearnProgress {
       exerciseId: (json['exercise_id'] as num?)?.toInt() ?? 0,
       bestConfidence: (json['best_confidence'] as num?)?.toDouble() ?? 0.0,
       passed: json['passed'] == true,
+      attempts: (json['attempts'] as num?)?.toInt() ?? 0,
+      correctAttempts: (json['correct_attempts'] as num?)?.toInt() ?? 0,
     );
   }
 }

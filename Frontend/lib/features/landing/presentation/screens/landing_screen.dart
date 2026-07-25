@@ -19,9 +19,11 @@ class LandingScreen extends StatelessWidget {
       ),
       _FeatureCardData(
         title: 'เรียนรู้ภาษามือ',
-        subtitle: 'Dictionary & Exercises',
+        subtitle: 'Dictionary & Lessons',
         description:
-            'คลังคำศัพท์ภาษามือไทยพร้อมภาพจำลองท่าทาง และแบบฝึกหัดตามหมวดหมู่แบบแผนที่บทเรียน ผ่านเมื่อทำท่าถูกต้องตามเกณฑ์ความเชื่อมั่นของ AI',
+            'คลังคำศัพท์ภาษามือไทยพร้อมภาพจำลองท่าทาง และบทเรียนแบบแผนที่ตามหมวดหมู่ '
+            'แต่ละคำเริ่มจากดูตัวอย่างท่าและคำอธิบาย แล้วฝึกทำท่าให้ผ่านเกณฑ์ความเชื่อมั่นของ AI '
+            'จบหัวข้อแล้วสรุปว่าทำถูกกี่ครั้งจากที่ลองทั้งหมด',
         accentColor: AppTheme.warningOrange,
         icon: Icons.menu_book_outlined,
         route: '/learn',

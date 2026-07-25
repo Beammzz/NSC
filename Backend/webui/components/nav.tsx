@@ -19,7 +19,7 @@ const navItems: NavItem[] = [
     label: 'TSL Model',
     matchPrefixes: ['/tsl-model', '/predictions', '/logs', '/settings', '/upload', '/tuning'],
   },
-  { label: 'LLM Model', disabled: true, badge: 'Coming soon' },
+  { href: '/llm/', label: 'LLM Model', matchPrefixes: ['/llm'] },
   { href: '/learn/', label: 'Learning' },
   { href: '/dictionary/', label: 'Dictionary' },
   { href: '/users/', label: 'Users' },

@@ -124,6 +124,26 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           activeThumbColor: AppTheme.primaryAccent,
                           onChanged: notifier.toggleHandSkeleton,
                         ),
+                        _buildDivider(),
+                        SwitchListTile(
+                          title: Text(
+                            'อวาตาร์แบบการ์ตูน (Cartoon Avatar)',
+                            style: TextStyle(
+                              color: context.textColor,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          subtitle: Text(
+                            'ปิดเพื่อดูท่าทางในคลังคำศัพท์เป็นจุดคีย์พอยต์',
+                            style: TextStyle(
+                              color: context.textMutedColor.withAlpha(200),
+                              fontSize: 12,
+                            ),
+                          ),
+                          value: settings.cartoonAvatar,
+                          activeThumbColor: AppTheme.primaryAccent,
+                          onChanged: notifier.toggleCartoonAvatar,
+                        ),
                       ],
                     ),
                     const SizedBox(height: 24),

@@ -82,12 +82,35 @@ class TranslationFrame {
   });
 }
 
+/// A finished sentence pushed by the backend at the end of a signing pause
+/// (docs/api/stream-schema.md, `sentence`). The words were composed
+/// server-side so the API key for the language model never ships in the app.
+class ComposedSentence {
+  final String text;
+  final List<String> words;
+
+  /// True when the backend joined the recognized words itself because the
+  /// language model was unconfigured or failed — the text is still correct
+  /// Thai, just not reordered or given function words.
+  final bool fallback;
+
+  const ComposedSentence({
+    required this.text,
+    required this.words,
+    required this.fallback,
+  });
+}
+
 /// Immutable state for the Scanner feature screen managed via Riverpod.
 class ScannerState {
   final bool isScanning;
   final String currentWord;
   final double confidence;
   final List<String> sentence;
+
+  /// The most recent backend-composed sentence, empty until one arrives.
+  /// [sentence] is the buffer still filling up for the NEXT one.
+  final String composedSentence;
   final int fps;
   final double latencySeconds;
   final bool isSpeaking;
@@ -102,6 +125,7 @@ class ScannerState {
     required this.currentWord,
     required this.confidence,
     required this.sentence,
+    required this.composedSentence,
     required this.fps,
     required this.latencySeconds,
     required this.isSpeaking,
@@ -115,6 +139,7 @@ class ScannerState {
       currentWord: '…',
       confidence: 0.0,
       sentence: [],
+      composedSentence: '',
       fps: 24,
       latencySeconds: 1.1,
       isSpeaking: false,
@@ -130,6 +155,7 @@ class ScannerState {
     String? currentWord,
     double? confidence,
     List<String>? sentence,
+    String? composedSentence,
     int? fps,
     double? latencySeconds,
     bool? isSpeaking,
@@ -141,6 +167,7 @@ class ScannerState {
       currentWord: currentWord ?? this.currentWord,
       confidence: confidence ?? this.confidence,
       sentence: sentence ?? this.sentence,
+      composedSentence: composedSentence ?? this.composedSentence,
       fps: fps ?? this.fps,
       latencySeconds: latencySeconds ?? this.latencySeconds,
       isSpeaking: isSpeaking ?? this.isSpeaking,

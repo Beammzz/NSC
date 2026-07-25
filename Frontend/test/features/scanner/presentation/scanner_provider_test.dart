@@ -60,6 +60,59 @@ void main() {
       expect(tts.isSpeaking, true);
     });
 
+    test('speakSentence prefers the composed sentence over the word buffer', () async {
+      final container = await makeContainer();
+      addTearDown(container.dispose);
+
+      final notifier = container.read(scannerProvider.notifier);
+      container.listen(scannerProvider, (prev, next) {});
+
+      expect(notifier.spokenText, '');
+
+      final streamService =
+          container.read(tslStreamServiceProvider) as SimulatedTslStreamService;
+      streamService.emitTestFrame(
+        const TranslationFrame(
+          word: 'ฉัน',
+          confidence: 0.95,
+          fps: 30,
+          latencySeconds: 0.1,
+          isDetecting: false,
+        ),
+      );
+      await Future.delayed(const Duration(milliseconds: 50));
+      expect(notifier.spokenText, 'ฉัน');
+
+      notifier.clearSentence();
+      expect(notifier.spokenText, '');
+    });
+
+    test('parseServerSentence reads a sentence message and ignores others', () {
+      final composed = parseServerSentence(
+        '{"schema_version":1,"type":"sentence","sentence":"ฉันรักเธอ",'
+        '"words":["ฉัน","รัก","เธอ"],"fallback":true,"latency_ms":0}',
+      );
+      expect(composed, isNotNull);
+      expect(composed!.text, 'ฉันรักเธอ');
+      expect(composed.words, ['ฉัน', 'รัก', 'เธอ']);
+      expect(composed.fallback, true);
+
+      expect(
+        parseServerSentence(
+          '{"schema_version":1,"type":"prediction","word":"ฉัน","confidence":0.9}',
+        ),
+        isNull,
+      );
+      // An empty sentence is not worth speaking.
+      expect(
+        parseServerSentence(
+          '{"schema_version":1,"type":"sentence","sentence":"  ","words":[]}',
+        ),
+        isNull,
+      );
+      expect(parseServerSentence('not json'), isNull);
+    });
+
     test('isScannerActiveProvider reports true only when scanner tab or mount override is active', () async {
       final container = await makeContainer();
       addTearDown(container.dispose);
