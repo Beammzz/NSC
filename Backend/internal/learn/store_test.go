@@ -256,6 +256,75 @@ func TestSignNote(t *testing.T) {
 	}
 }
 
+func TestResetTopicProgress(t *testing.T) {
+	s := testStore(t)
+	topic, _ := s.CreateTopic(Topic{Slug: "t", Title: "t", Published: true})
+	a, _ := s.CreateExercise(Exercise{TopicID: topic.ID, Word: "กิน", PassConfidence: 0.8, Published: true})
+	b, _ := s.CreateExercise(Exercise{TopicID: topic.ID, Word: "ดื่ม", PassConfidence: 0.8, Published: true})
+	other, _ := s.CreateTopic(Topic{Slug: "o", Title: "o", Published: true})
+	keep, _ := s.CreateExercise(Exercise{TopicID: other.ID, Word: "นอน", PassConfidence: 0.8, Published: true})
+
+	const user = int64(7)
+	for _, ex := range []Exercise{a, b, keep} {
+		if _, err := s.RecordAttempt(user, ex.ID, 0.9); err != nil {
+			t.Fatalf("recording attempt: %v", err)
+		}
+	}
+	// A second learner's rows must survive the first learner's reset.
+	if _, err := s.RecordAttempt(8, a.ID, 0.95); err != nil {
+		t.Fatalf("recording other-user attempt: %v", err)
+	}
+
+	cleared, err := s.ResetTopicProgress(user, topic.ID)
+	if err != nil {
+		t.Fatalf("resetting: %v", err)
+	}
+	if cleared != 2 {
+		t.Errorf("cleared = %d rows, want 2", cleared)
+	}
+
+	rows, _ := s.ListProgress(user)
+	if len(rows) != 1 || rows[0].ExerciseID != keep.ID {
+		t.Fatalf("after reset the user should keep only the other topic, got %+v", rows)
+	}
+	if len(mustProgress(t, s, 8)) != 1 {
+		t.Errorf("reset leaked into another learner's progress")
+	}
+
+	// The attempt log is kept, so admin analytics still sees the old tries and
+	// a fresh attempt resumes the tally rather than starting over.
+	stats, _ := s.ListExerciseStats()
+	for _, st := range stats {
+		if st.ExerciseID == a.ID && st.Attempts != 2 {
+			t.Errorf("attempt log lost on reset: %+v", st)
+		}
+	}
+
+	// Resetting a topic that was never practised is a no-op, not an error.
+	again, err := s.ResetTopicProgress(user, topic.ID)
+	if err != nil || again != 0 {
+		t.Errorf("second reset: cleared = %d, err = %v; want 0, nil", again, err)
+	}
+
+	// After the reset the exercise is practisable again from zero.
+	p, err := s.RecordAttempt(user, a.ID, 0.5)
+	if err != nil {
+		t.Fatalf("re-practising: %v", err)
+	}
+	if p.Passed || p.BestConfidence != 0.5 {
+		t.Errorf("reset did not clear pass/best: %+v", p)
+	}
+}
+
+func mustProgress(t *testing.T, s *Store, userID int64) []Progress {
+	t.Helper()
+	rows, err := s.ListProgress(userID)
+	if err != nil {
+		t.Fatalf("listing progress for %d: %v", userID, err)
+	}
+	return rows
+}
+
 func TestListExerciseStats(t *testing.T) {
 	s := testStore(t)
 	topic, _ := s.CreateTopic(Topic{Slug: "t", Title: "ทักทาย", Published: true})

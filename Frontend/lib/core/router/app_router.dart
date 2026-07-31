@@ -49,7 +49,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           final args = state.extra as ExampleArgs;
           return SignExampleScreen(
             topic: args.topic,
-            exercise: args.exercise,
+            index: args.index,
           );
         },
       ),
@@ -60,7 +60,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           final args = state.extra as PracticeArgs;
           return ExercisePracticeScreen(
             topic: args.topic,
-            exercise: args.exercise,
+            index: args.index,
           );
         },
       ),

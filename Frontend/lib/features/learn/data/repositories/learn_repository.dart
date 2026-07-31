@@ -15,6 +15,10 @@ abstract class LearnRepository {
   Future<DictionarySign> fetchSignDetail(String word);
   Future<List<LearnProgress>> fetchProgress();
   Future<LearnProgress> recordAttempt(int exerciseId, double confidence);
+
+  /// Clears the caller's pass/best rows for one topic so it can be practised
+  /// again. The server keeps the attempt log (it feeds the admin analytics).
+  Future<void> resetTopicProgress(int topicId);
 }
 
 /// Offline demo content: mirrors the backend seed's starter topics
@@ -258,6 +262,18 @@ class SimulatedLearnRepository implements LearnRepository {
     _progress[exerciseId] = row;
     return row;
   }
+
+  @override
+  Future<void> resetTopicProgress(int topicId) async {
+    final topic = _topics.firstWhere(
+      (t) => t.id == topicId,
+      orElse: () => const LearnTopic(
+          id: 0, slug: '', title: '', icon: '', sortOrder: 0, exercises: []),
+    );
+    for (final exercise in topic.exercises) {
+      _progress.remove(exercise.id);
+    }
+  }
 }
 
 /// Real client for `/api/v1/learn/*` with the JWT on every request.
@@ -343,6 +359,11 @@ class HttpLearnRepository implements LearnRepository {
           exerciseId: exerciseId, bestConfidence: confidence, passed: false);
     }
     return LearnProgress.fromJson(data);
+  }
+
+  @override
+  Future<void> resetTopicProgress(int topicId) async {
+    await _request('DELETE', '/api/v1/learn/progress/topic/$topicId');
   }
 }
 

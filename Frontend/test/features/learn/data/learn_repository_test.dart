@@ -43,6 +43,30 @@ void main() {
       expect(progress, hasLength(1));
     });
 
+    test('resetTopicProgress clears only the given topic', () async {
+      final repo = SimulatedLearnRepository();
+      final topics = await repo.fetchTopics();
+      final first = topics[0];
+      final second = topics[1];
+
+      await repo.recordAttempt(first.exercises[0].id, 0.95);
+      await repo.recordAttempt(first.exercises[1].id, 0.95);
+      await repo.recordAttempt(second.exercises[0].id, 0.95);
+      expect(await repo.fetchProgress(), hasLength(3));
+
+      await repo.resetTopicProgress(first.id);
+
+      final rows = await repo.fetchProgress();
+      expect(rows, hasLength(1));
+      expect(rows.single.exerciseId, second.exercises[0].id);
+
+      // Cleared words are practisable from zero again.
+      final row = await repo.recordAttempt(first.exercises[0].id, 0.4);
+      expect(row.passed, isFalse);
+      expect(row.bestConfidence, 0.4);
+      expect(row.attempts, 1);
+    });
+
     test('dictionary entries carry the example note', () async {
       final repo = SimulatedLearnRepository();
       final signs = await repo.fetchDictionary();

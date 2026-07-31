@@ -617,3 +617,63 @@ NOTE: an earlier probe showed the note as "?????" — that was Git Bash mangling
 command-line argument, not the server; resending the same body from a UTF-8 file round-tripped.
 DOX synced: Backend/AGENTS.md (routes, attempt-log/note tables, webui sections), Frontend/AGENTS.md
 (learn feature row, attempt semantics), landing_screen.dart per the Feature Registry Sync Rule.
+
+## Goal (2026-07-25, round 2): Duolingo-style lesson map (done, uncommitted)
+User screenshot showed the PRE-CHANGE build (label still "แบบฝึกหัด") — the round-1 rename and the
+example step were already in source, just not on the phone. Real new asks: (a) roadmap must show
+lesson ICONS only, no topic name and no word chips; (b) pressing the icon opens a detail popup with
+a start button, Duolingo-style; (c) the emoji was not tappable — only the word chip was.
+DECISIONS (user-answered): Start runs the WHOLE topic end to end (example -> practice -> next word
+-> ... -> summary); the popup shows title + progress + Start only, no word list.
+BUILT:
+1. learn_screen.dart: `_TopicNode`/`_ExerciseChip` (card with title + word chips) DELETED, replaced
+   by `_LessonNode` (86px progress ring + 68px emoji disc, whole disc is an InkWell — this is the
+   "emoji dont work" fix; padlock when locked, check badge when complete) laid out on a meandering
+   path via `_pathOffsets`, plus `_LessonSheet` bottom sheet (icon, title, `ผ่านแล้ว N จาก M คำ`,
+   Start / เรียนต่อ / ฝึกซ้ำอีกครั้ง; locked topics get the unlock hint and no button).
+2. Chaining: `ExampleArgs`/`PracticeArgs` now carry `(topic, index)` instead of a bare exercise.
+   Practice `_advance()` replaces `_leavePractice()` — on pass it pushReplacement's the next word's
+   example, or the summary after the last. Both screens show `คำที่ N/M` in the app bar.
+   Start index = first unpassed exercise, or 0 when the topic is already complete (replay).
+3. app_router.dart passes `index`; learn_screen_test.dart rewritten for the new design (asserts the
+   path names NOTHING, that the icon tap opens the sheet, and that a locked topic has no Start).
+VERIFIED 2026-07-25: flutter analyze "No issues found!"; flutter test "All tests passed!" (67).
+DEBUG note: first run of the new roadmap test failed — `Expected: exactly 8 matching candidates /
+Actual: Found 4 widgets with type "CircularProgressIndicator"`. CAUSE was the assertion, not the
+widget: ListView only builds nodes inside the 800x600 test viewport. Count assertion dropped for
+`findsWidgets`; production code untouched.
+
+## Failed attempts
+- ATTEMPT 1 [L1] (2026-07-25, ฝึกทำใหม่ widget test): seeded topic progress with
+  `await repo.fetchTopics()` directly inside `testWidgets` -> `TimeoutException after
+  0:10:00.000000: Test timed out after 10 minutes.` Cause: `SimulatedLearnRepository.fetchTopics`
+  sleeps on `Future.delayed(300ms)` and testWidgets' fake clock only advances on `tester.pump`.
+  Fix: wrap the seeding in `tester.runAsync`.
+
+## Goal (2026-07-25, round 3): "ฝึกทำใหม่" resets topic progress (done, uncommitted)
+User: "Make the ฝึกทำใหม่ Reset all progress. Currently it skip all the exercise. and dont let
+user do again."
+CAUSE of the skip (traced, not guessed): exercise_practice_screen.dart initState seeds
+`_passed = stored.passed` from saved progress, so a already-passed word renders `_PassedCard`
+before any try and `_startAttempt()` early-returns on `if (_passed ...)`. The only live control is
+"คำต่อไป", which walks every passed word straight to the summary.
+DECISIONS (user-answered): reset scope = THIS TOPIC ONLY (other topics keep progress, unlock chain
+intact); the learn_attempts log is KEPT (admin analytics never loses history — consequence: a
+replayed topic's summary counts the old tries plus the new ones).
+BUILT:
+1. Backend: `Store.ResetTopicProgress(userID, topicID) (int, error)` deletes learn_progress rows
+   for the topic's exercises only, never learn_attempts. Route
+   `DELETE /api/v1/learn/progress/topic/{id}` (user role) always scopes to claims.Sub, so a
+   client-supplied topic id cannot touch another learner. Returns {topic_id, cleared}.
+2. Flutter: `LearnRepository.resetTopicProgress` (http + simulated), `LearnProgressNotifier.
+   resetTopic(topic)` (clears the same keys locally, THROWS on failure), and `_LessonSheet` is now
+   stateful — completed topics show `ฝึกทำใหม่`, which opens a confirm dialog
+   ("ล้างและเริ่มใหม่" / "ยกเลิก"), resets, then starts at index 0. A failed reset does NOT
+   navigate (starting would reproduce the skip bug) and shows an inline error instead.
+VERIFIED 2026-07-25: go vet ./... clean; go test -count=1 ./... all ok; flutter analyze
+"No issues found!"; flutter test "All tests passed!" (69, was 67).
+Live probe on throwaway :8099 + scratch DB: 6 progress rows -> DELETE topic 1 -> {"cleared":5,
+"topic_id":1} HTTP 200 -> 1 row left (exercise 6, the other topic, untouched). Analytics after the
+reset still reports attempts=1 per word with learners_passed dropped to 0 (log kept, pass cleared).
+Re-practising exercise 1 at 0.4 -> {"best_confidence":0.4,"passed":false,"attempts":2} — i.e.
+practisable again from zero, tally continuing. Bad topic id -> HTTP 400; no token -> HTTP 401.

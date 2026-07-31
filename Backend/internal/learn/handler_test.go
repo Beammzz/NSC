@@ -244,6 +244,50 @@ func TestProgressRoundTrip(t *testing.T) {
 	}
 }
 
+func TestResetTopicProgressEndpoint(t *testing.T) {
+	srv, userToken, _, store := testServer(t)
+	topics, _ := store.ListTopics(true)
+	topic := topics[0]
+	ex := topic.Exercises[0]
+
+	doJSON(t, "POST", srv.URL+"/api/v1/learn/progress", userToken,
+		`{"exercise_id": `+jsonInt(ex.ID)+`, "confidence": 0.92}`)
+
+	resp := doJSON(t, "DELETE",
+		srv.URL+"/api/v1/learn/progress/topic/"+jsonInt(topic.ID), userToken, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("reset: status = %d, want 200", resp.StatusCode)
+	}
+	var body struct {
+		TopicID int64 `json:"topic_id"`
+		Cleared int   `json:"cleared"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decoding reset: %v", err)
+	}
+	if body.Cleared != 1 {
+		t.Errorf("cleared = %d, want 1", body.Cleared)
+	}
+
+	// Progress is gone, so the lesson can be practised again.
+	resp = doJSON(t, "GET", srv.URL+"/api/v1/learn/progress", userToken, "")
+	var listBody struct {
+		Progress []Progress `json:"progress"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&listBody); err != nil {
+		t.Fatalf("decoding progress: %v", err)
+	}
+	if len(listBody.Progress) != 0 {
+		t.Errorf("progress after reset = %+v, want empty", listBody.Progress)
+	}
+
+	// A non-numeric topic id is rejected rather than silently clearing nothing.
+	resp = doJSON(t, "DELETE", srv.URL+"/api/v1/learn/progress/topic/abc", userToken, "")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("bad topic id: status = %d, want 400", resp.StatusCode)
+	}
+}
+
 func TestSignNoteAndAnalyticsEndpoints(t *testing.T) {
 	srv, userToken, adminToken, store := testServer(t)
 	topics, _ := store.ListTopics(true)

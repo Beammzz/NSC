@@ -523,6 +523,27 @@ ON CONFLICT (user_id, exercise_id) DO UPDATE SET
 	return p, nil
 }
 
+// ResetTopicProgress clears one user's pass/best rows for every exercise in a
+// topic, so the topic can be practised from scratch. The learn_attempts log is
+// deliberately NOT touched: those tries really happened and the admin
+// analytics is built from them. Returns the number of rows cleared; a topic
+// the user never practised resets to 0 rows without error.
+func (s *Store) ResetTopicProgress(userID, topicID int64) (int, error) {
+	res, err := s.db.Exec(`
+DELETE FROM learn_progress
+WHERE user_id = ?
+  AND exercise_id IN (SELECT id FROM learn_exercises WHERE topic_id = ?)`,
+		userID, topicID)
+	if err != nil {
+		return 0, fmt.Errorf("resetting topic progress: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("rows affected: %w", err)
+	}
+	return int(n), nil
+}
+
 // ListExerciseStats returns the admin analytics rollup: one row per exercise
 // that has at least one logged attempt, newest content first by topic order.
 func (s *Store) ListExerciseStats() ([]ExerciseStats, error) {

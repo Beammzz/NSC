@@ -38,6 +38,19 @@ class LearnProgressNotifier
     state = AsyncData(current);
     return row;
   }
+
+  /// Clears the topic's progress server-side, then drops the same rows from
+  /// local state so the lesson is immediately practisable again. Throws on
+  /// failure — the caller must not start the lesson if this did not land,
+  /// or the practice screen would still see the words as passed.
+  Future<void> resetTopic(LearnTopic topic) async {
+    await ref.read(learnRepositoryProvider).resetTopicProgress(topic.id);
+    final current = Map<int, LearnProgress>.from(state.value ?? {});
+    for (final exercise in topic.exercises) {
+      current.remove(exercise.id);
+    }
+    state = AsyncData(current);
+  }
 }
 
 final learnProgressProvider =

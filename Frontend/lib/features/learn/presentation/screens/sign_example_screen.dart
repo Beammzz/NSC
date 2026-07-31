@@ -8,12 +8,13 @@ import 'package:signmind/features/learn/presentation/screens/exercise_practice_s
 import 'package:signmind/features/learn/presentation/widgets/sign_avatar.dart';
 import 'package:signmind/features/settings/presentation/providers/settings_provider.dart';
 
-/// Route arguments for `/learn/example`.
+/// Route arguments for `/learn/example`. [index] is the position within
+/// `topic.exercises` — a lesson runs the topic from here to the end.
 class ExampleArgs {
-  const ExampleArgs({required this.topic, required this.exercise});
+  const ExampleArgs({required this.topic, required this.index});
 
   final LearnTopic topic;
-  final LearnExercise exercise;
+  final int index;
 }
 
 /// Step 1 of an exercise: show the dictionary example (avatar animation) and
@@ -22,11 +23,13 @@ class SignExampleScreen extends ConsumerWidget {
   const SignExampleScreen({
     super.key,
     required this.topic,
-    required this.exercise,
+    required this.index,
   });
 
   final LearnTopic topic;
-  final LearnExercise exercise;
+  final int index;
+
+  LearnExercise get exercise => topic.exercises[index];
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -42,6 +45,17 @@ class SignExampleScreen extends ConsumerWidget {
         foregroundColor: context.textColor,
         elevation: 0,
         title: Text(topic.title, style: const TextStyle(fontSize: 16)),
+        actions: [
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: Text(
+                'คำที่ ${index + 1}/${topic.exercises.length}',
+                style: TextStyle(fontSize: 13, color: context.textMutedColor),
+              ),
+            ),
+          ),
+        ],
       ),
       body: SafeArea(
         child: Column(
@@ -143,7 +157,7 @@ class SignExampleScreen extends ConsumerWidget {
                   // back to the roadmap (or the summary), not to this example.
                   onPressed: () => context.pushReplacement(
                     '/learn/practice',
-                    extra: PracticeArgs(topic: topic, exercise: exercise),
+                    extra: PracticeArgs(topic: topic, index: index),
                   ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppTheme.primaryAccent,

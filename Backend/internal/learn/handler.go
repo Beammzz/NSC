@@ -28,6 +28,7 @@ import (
 //	GET  /api/v1/learn/dictionary/{word} one entry incl. keypoint frames
 //	GET  /api/v1/learn/progress          caller's progress rows
 //	POST /api/v1/learn/progress          record an attempt {exercise_id, confidence}
+//	DELETE /api/v1/learn/progress/topic/{id}  clear the caller's progress for one topic
 //
 // Admin endpoints (admin role):
 //
@@ -87,6 +88,7 @@ func (h *Handler) RegisterProtected(mux *http.ServeMux, userMW, adminMW func(htt
 	mux.Handle("GET /api/v1/learn/dictionary/{word}", user(h.dictionaryEntry))
 	mux.Handle("GET /api/v1/learn/progress", user(h.progress))
 	mux.Handle("POST /api/v1/learn/progress", user(h.recordAttempt))
+	mux.Handle("DELETE /api/v1/learn/progress/topic/{id}", user(h.resetTopicProgress))
 
 	mux.Handle("GET /api/v1/admin/learn/topics", admin(h.adminTopics))
 	mux.Handle("POST /api/v1/admin/learn/topics", admin(h.createTopic))
@@ -177,6 +179,29 @@ func (h *Handler) recordAttempt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, p)
+}
+
+// resetTopicProgress clears the CALLER's progress for one topic (the app's
+// "practise this lesson again" action). It always scopes the delete to the
+// token's own user id, so a topic id from the client can never reach another
+// learner's rows. The attempt log survives — see Store.ResetTopicProgress.
+func (h *Handler) resetTopicProgress(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.ClaimsFromContext(r.Context())
+	if !ok {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusUnauthorized, "Authentication required", ""))
+		return
+	}
+	topicID, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	cleared, err := h.store.ResetTopicProgress(claims.Sub, topicID)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"topic_id": topicID, "cleared": cleared})
 }
 
 // ---- admin endpoints ----

@@ -6,17 +6,19 @@ import 'package:go_router/go_router.dart';
 import 'package:signmind/core/theme/app_theme.dart';
 import 'package:signmind/features/learn/domain/models/learn_models.dart';
 import 'package:signmind/features/learn/presentation/providers/learn_provider.dart';
+import 'package:signmind/features/learn/presentation/screens/sign_example_screen.dart';
 import 'package:signmind/features/learn/presentation/screens/topic_summary_screen.dart';
 import 'package:signmind/features/scanner/presentation/providers/scanner_provider.dart';
 import 'package:signmind/features/scanner/presentation/widgets/camera_viewport.dart';
 import 'package:signmind/features/settings/presentation/providers/settings_provider.dart';
 
-/// Route arguments for `/learn/practice`.
+/// Route arguments for `/learn/practice`. [index] is the position within
+/// `topic.exercises`; passing it advances the lesson to the next word.
 class PracticeArgs {
-  const PracticeArgs({required this.topic, required this.exercise});
+  const PracticeArgs({required this.topic, required this.index});
 
   final LearnTopic topic;
-  final LearnExercise exercise;
+  final int index;
 }
 
 /// Step 2 of an exercise: reuses the scanner camera + landmark pipeline.
@@ -28,11 +30,16 @@ class ExercisePracticeScreen extends ConsumerStatefulWidget {
   const ExercisePracticeScreen({
     super.key,
     required this.topic,
-    required this.exercise,
+    required this.index,
   });
 
   final LearnTopic topic;
-  final LearnExercise exercise;
+  final int index;
+
+  LearnExercise get exercise => topic.exercises[index];
+
+  /// True when another word follows this one in the lesson.
+  bool get hasNext => index + 1 < topic.exercises.length;
 
   @override
   ConsumerState<ExercisePracticeScreen> createState() =>
@@ -166,25 +173,21 @@ class _ExercisePracticeScreenState
     }
   }
 
-  /// True once every exercise in this topic is passed — the trigger for the
-  /// end-of-topic summary.
-  bool _isTopicComplete() {
-    final progress =
-        ref.read(learnProgressProvider).value ?? const <int, LearnProgress>{};
-    final exercises = widget.topic.exercises;
-    return exercises.isNotEmpty &&
-        exercises.every((e) => progress[e.id]?.passed ?? false);
-  }
-
-  void _leavePractice() {
-    if (_isTopicComplete()) {
+  /// Continues the lesson: the next word's example step, or the end-of-topic
+  /// summary once the last word is passed. Replaces rather than pushes, so
+  /// backing out of a lesson never walks through every word already done.
+  void _advance() {
+    if (widget.hasNext) {
       context.pushReplacement(
-        '/learn/summary',
-        extra: TopicSummaryArgs(topic: widget.topic),
+        '/learn/example',
+        extra: ExampleArgs(topic: widget.topic, index: widget.index + 1),
       );
       return;
     }
-    context.pop();
+    context.pushReplacement(
+      '/learn/summary',
+      extra: TopicSummaryArgs(topic: widget.topic),
+    );
   }
 
   @override
@@ -206,6 +209,17 @@ class _ExercisePracticeScreenState
           widget.topic.title,
           style: const TextStyle(fontSize: 16),
         ),
+        actions: [
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: Text(
+                'คำที่ ${widget.index + 1}/${widget.topic.exercises.length}',
+                style: TextStyle(fontSize: 13, color: context.textMutedColor),
+              ),
+            ),
+          ),
+        ],
       ),
       body: SafeArea(
         child: Column(
@@ -283,8 +297,8 @@ class _ExercisePracticeScreenState
                         confidence: _bestConfidence,
                         attempts: _attempts,
                         correct: _correct,
-                        topicComplete: _isTopicComplete(),
-                        onDone: _leavePractice,
+                        hasNext: widget.hasNext,
+                        onDone: _advance,
                       )
                     : Column(
                         children: [
@@ -476,7 +490,7 @@ class _PassedCard extends StatelessWidget {
     required this.confidence,
     required this.attempts,
     required this.correct,
-    required this.topicComplete,
+    required this.hasNext,
     required this.onDone,
   });
 
@@ -484,7 +498,7 @@ class _PassedCard extends StatelessWidget {
   final double confidence;
   final int attempts;
   final int correct;
-  final bool topicComplete;
+  final bool hasNext;
   final VoidCallback onDone;
 
   @override
@@ -524,9 +538,7 @@ class _PassedCard extends StatelessWidget {
             ),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-              child: Text(
-                topicComplete ? 'ดูสรุปผลของหัวข้อนี้' : 'กลับสู่แผนที่บทเรียน',
-              ),
+              child: Text(hasNext ? 'คำต่อไป' : 'ดูสรุปผลของหัวข้อนี้'),
             ),
           ),
         ],
