@@ -2,18 +2,23 @@ package llm
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
 func openTemp(t *testing.T) *Store {
 	t.Helper()
-	store, err := Open(filepath.Join(t.TempDir(), "data", "llm.db"))
+	store, err := Open(filepath.Join(t.TempDir(), "data", "llm.db"), testEncKey)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	t.Cleanup(func() { store.Close() })
 	return store
 }
+
+// testEncKey is a fixed 32-byte AES-256 key for tests — production derives
+// this from the JWT secret via DeriveEncryptionKey (see cmd/server/main.go).
+var testEncKey = DeriveEncryptionKey([]byte("test-jwt-secret-not-used-for-real"))
 
 func TestGetSettingsReturnsDefaultsWhenNothingSaved(t *testing.T) {
 	store := openTemp(t)
@@ -59,6 +64,46 @@ func TestSaveSettingsPatchesOnlyProvidedFields(t *testing.T) {
 	}
 	if got.SystemPrompt != prompt {
 		t.Errorf("SystemPrompt = %q, want %q", got.SystemPrompt, prompt)
+	}
+}
+
+func TestAPIKeyIsNotStoredInPlaintext(t *testing.T) {
+	store := openTemp(t)
+	key := "sk-super-secret-do-not-leak"
+	if _, err := store.SaveSettings(SettingsPatch{APIKey: &key}); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+
+	var raw string
+	if err := store.db.QueryRow(
+		`SELECT value FROM llm_settings WHERE key = ?`, keyAPIKey,
+	).Scan(&raw); err != nil {
+		t.Fatalf("reading raw api_key column: %v", err)
+	}
+	if raw == key {
+		t.Fatalf("api_key stored in plaintext: %q", raw)
+	}
+	if strings.Contains(raw, key) {
+		t.Fatalf("plaintext key substring found in stored value: %q", raw)
+	}
+
+	// A different key derivation must not be able to decrypt it.
+	other := &Store{db: store.db, encKey: DeriveEncryptionKey([]byte("a-different-jwt-secret"))}
+	got, err := other.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings with wrong key: %v", err)
+	}
+	if got.APIKey != "" {
+		t.Fatalf("decrypted with the wrong key: got %q, want empty", got.APIKey)
+	}
+
+	// The correct key still round-trips.
+	got, err = store.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	if got.APIKey != key {
+		t.Fatalf("APIKey = %q, want %q", got.APIKey, key)
 	}
 }
 

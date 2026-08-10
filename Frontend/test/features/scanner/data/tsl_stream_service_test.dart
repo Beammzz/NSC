@@ -251,11 +251,28 @@ void main() {
           'ws://192.168.1.5:8080/api/v1/stream');
     });
 
-    test('adds ws:// when no scheme is provided', () {
+    test('adds wss:// (secure default) when no scheme is provided', () {
       Uri? connectedTo;
       final channel = FakeWebSocketChannel();
       final service = WebSocketTslStreamService(
         baseUrl: '192.168.1.5:8080',
+        connect: (uri) {
+          connectedTo = uri;
+          return channel;
+        },
+      );
+      addTearDown(service.dispose);
+
+      service.start();
+      expect(connectedTo.toString(),
+          'wss://192.168.1.5:8080/api/v1/stream');
+    });
+
+    test('keeps ws:// when the scheme is given explicitly', () {
+      Uri? connectedTo;
+      final channel = FakeWebSocketChannel();
+      final service = WebSocketTslStreamService(
+        baseUrl: 'ws://192.168.1.5:8080',
         connect: (uri) {
           connectedTo = uri;
           return channel;

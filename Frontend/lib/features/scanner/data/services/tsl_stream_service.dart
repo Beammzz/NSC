@@ -242,12 +242,16 @@ class WebSocketTslStreamService implements TslStreamService {
     // Normalize scheme: WebSocketChannel.connect requires ws:// or wss://.
     // Users may enter http:// or https:// in the server URL field — convert
     // them so the connection succeeds instead of immediately disconnecting.
+    // A bare host with no scheme defaults to wss:// (secure), matching
+    // auth_provider.dart's _toHttpUrl — the JWT bearer token and every
+    // landmark frame flow over this connection and must not silently fall
+    // back to plaintext. Typing ws:// explicitly still works as entered.
     if (base.startsWith('https://')) {
       base = 'wss://${base.substring(8)}';
     } else if (base.startsWith('http://')) {
       base = 'ws://${base.substring(7)}';
     } else if (!base.startsWith('ws://') && !base.startsWith('wss://')) {
-      base = 'ws://$base';
+      base = 'wss://$base';
     }
     return Uri.parse('$base$_streamPath');
   }

@@ -90,6 +90,22 @@ class TestStreamInference:
         assert excinfo.value.code() == grpc.StatusCode.INVALID_ARGUMENT
         assert "441" in excinfo.value.details()
 
+    def test_non_finite_features_rejected(self, stack):
+        stub, _, _ = stack
+        bad = [float("nan")] * 147 + [0.0] * 294
+        with pytest.raises(grpc.RpcError) as excinfo:
+            list(stub.StreamInference(iter([frame(0, bad)])))
+        assert excinfo.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+        assert "finite" in excinfo.value.details()
+
+    def test_infinite_features_rejected(self, stack):
+        stub, _, _ = stack
+        bad = [float("inf")] * 147 + [0.0] * 294
+        with pytest.raises(grpc.RpcError) as excinfo:
+            list(stub.StreamInference(iter([frame(0, bad)])))
+        assert excinfo.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+        assert "finite" in excinfo.value.details()
+
     def test_no_model_rejected(self, tmp_path):
         engine = eng.InferenceEngine(
             output_dir=str(tmp_path), interpreter_factory=lambda path: None
@@ -105,6 +121,71 @@ class TestStreamInference:
                 assert excinfo.value.code() == grpc.StatusCode.FAILED_PRECONDITION
         finally:
             grpc_server.stop(grace=None)
+
+
+class TestSharedSecretAuth:
+    """Any client that can reach the listen address must not get a free
+    pass to UploadModel/SetTuning/StreamLogs without the shared secret."""
+
+    @pytest.fixture
+    def secured_stack(self, tmp_path):
+        write_artifacts(tmp_path)
+        engine = eng.InferenceEngine(
+            output_dir=str(tmp_path),
+            interpreter_factory=lambda path: FakeInterpreter(CONFIDENT),
+        )
+        broadcaster = logstream.LogBroadcaster()
+        grpc_server, port = server.build_server(
+            engine, broadcaster, "localhost:0", shared_secret="s3cr3t"
+        )
+        grpc_server.start()
+        channel = grpc.insecure_channel(f"localhost:{port}")
+        try:
+            yield channel
+        finally:
+            channel.close()
+            grpc_server.stop(grace=None)
+
+    def _stub(self, channel):
+        return pb_grpc.TslInferenceStub(channel)
+
+    def test_unary_rpc_without_secret_rejected(self, secured_stack):
+        stub = self._stub(secured_stack)
+        with pytest.raises(grpc.RpcError) as excinfo:
+            stub.GetTuning(pb.GetTuningRequest())
+        assert excinfo.value.code() == grpc.StatusCode.UNAUTHENTICATED
+
+    def test_unary_rpc_with_wrong_secret_rejected(self, secured_stack):
+        stub = self._stub(secured_stack)
+        with pytest.raises(grpc.RpcError) as excinfo:
+            stub.GetTuning(
+                pb.GetTuningRequest(),
+                metadata=(("x-signmind-shared-secret", "wrong"),),
+            )
+        assert excinfo.value.code() == grpc.StatusCode.UNAUTHENTICATED
+
+    def test_unary_rpc_with_correct_secret_admitted(self, secured_stack):
+        stub = self._stub(secured_stack)
+        response = stub.GetTuning(
+            pb.GetTuningRequest(),
+            metadata=(("x-signmind-shared-secret", "s3cr3t"),),
+        )
+        assert response.model_loaded
+
+    def test_streaming_rpc_without_secret_rejected(self, secured_stack):
+        stub = self._stub(secured_stack)
+        with pytest.raises(grpc.RpcError) as excinfo:
+            list(stub.StreamInference(wire_frames(1)))
+        assert excinfo.value.code() == grpc.StatusCode.UNAUTHENTICATED
+
+    def test_streaming_rpc_with_correct_secret_admitted(self, secured_stack):
+        stub = self._stub(secured_stack)
+        predictions = list(
+            stub.StreamInference(
+                wire_frames(30), metadata=(("x-signmind-shared-secret", "s3cr3t"),)
+            )
+        )
+        assert len(predictions) == 1
 
 
 def upload_requests(files):
@@ -165,6 +246,21 @@ class TestUploadModel:
         with pytest.raises(grpc.RpcError) as excinfo:
             stub.UploadModel(iter([pb.UploadModelRequest(chunk=b"orphan")]))
         assert excinfo.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+    def test_old_upload_dirs_are_pruned(self, stack):
+        stub, engine, _ = stack
+        for _ in range(server.MAX_RETAINED_UPLOADS + 3):
+            stub.UploadModel(
+                upload_requests([
+                    (pb.FILE_KIND_TFLITE_MODEL, b"new-model-bytes" * 100, None),
+                    (pb.FILE_KIND_LABEL_MAP, label_map_bytes(), None),
+                ])
+            )
+        uploads_dir = os.path.join(engine.output_dir, server.UPLOADS_DIRNAME)
+        remaining = list(os.scandir(uploads_dir))
+        assert len(remaining) <= server.MAX_RETAINED_UPLOADS
+        # The currently active directory must have survived the prune.
+        assert os.path.basename(engine.artifact_dir) in {e.name for e in remaining}
 
     def test_invalid_label_map_keeps_old_model(self, stack):
         stub, engine, _ = stack

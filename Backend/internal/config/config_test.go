@@ -17,6 +17,16 @@ func TestDefaultsAreProd(t *testing.T) {
 	if cfg.DBPath != "data/predictions.db" {
 		t.Fatalf("unexpected DB path: %q", cfg.DBPath)
 	}
+	if cfg.AISharedSecret != "" {
+		t.Fatalf("expected empty AISharedSecret default, got %q", cfg.AISharedSecret)
+	}
+}
+
+func TestAISharedSecretLoadsFromEnv(t *testing.T) {
+	cfg := load(map[string]string{"SIGNMIND_AI_SHARED_SECRET": "s3cr3t"})
+	if cfg.AISharedSecret != "s3cr3t" {
+		t.Fatalf("expected AISharedSecret to load, got %q", cfg.AISharedSecret)
+	}
 }
 
 func TestDotEnvValuesApply(t *testing.T) {

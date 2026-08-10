@@ -89,7 +89,45 @@ def load_preprocess_config(output_dir: str) -> dict:
             f"{path} must contain a JSON object, got {type(loaded).__name__}"
         )
     config.update(loaded)
+    _validate_config(config, path)
     return config
+
+
+def _validate_config(config: dict, source: str) -> None:
+    """Reject values that would corrupt engine state or crash a live stream.
+
+    Runs on every load (including uploaded artifacts activated via
+    InferenceEngine.activate_artifacts), so a bad value never reaches the
+    engine's live config/tuning — activate_artifacts rolls back to the
+    previous config on the ValueError this raises.
+    """
+    threshold = config["confidence_threshold"]
+    if not isinstance(threshold, (int, float)) or isinstance(threshold, bool) or not (
+        0.0 <= threshold <= 1.0
+    ):
+        raise ValueError(
+            f"{source}: confidence_threshold must be a number in [0, 1], "
+            f"got {threshold!r}"
+        )
+    target_fps = config["target_fps"]
+    if (
+        not isinstance(target_fps, (int, float))
+        or isinstance(target_fps, bool)
+        or target_fps <= 0
+    ):
+        raise ValueError(
+            f"{source}: target_fps must be a positive number, got {target_fps!r}"
+        )
+    sequence_length = config["sequence_length"]
+    if (
+        not isinstance(sequence_length, int)
+        or isinstance(sequence_length, bool)
+        or sequence_length <= 0
+    ):
+        raise ValueError(
+            f"{source}: sequence_length must be a positive integer, "
+            f"got {sequence_length!r}"
+        )
 
 
 def feature_dim(config: dict) -> int:

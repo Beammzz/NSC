@@ -12,7 +12,10 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
+	"gitea.harumi.dev/Harumi/NSC/backend/internal/httpapi"
 	"gitea.harumi.dev/Harumi/NSC/backend/internal/pb"
 )
 
@@ -102,6 +105,62 @@ func validFrame(seq int) map[string]any {
 		"seq":            seq,
 		"timestamp_ms":   1720252800000,
 		"features":       features,
+	}
+}
+
+func TestOversizedFrameClosesConnection(t *testing.T) {
+	aiStream := newFakeAIStream()
+	conn, cleanup := dialTestServer(t, &fakeAIClient{stream: aiStream})
+	defer cleanup()
+	readServerMessage(t, conn) // ready
+
+	// Comfortably over maxClientMessageBytes (64 KiB) once JSON-encoded —
+	// a legitimate 441-value frame is well under 10 KiB.
+	huge := make([]float32, 40000)
+	msg := map[string]any{
+		"schema_version": schemaVersion,
+		"type":           typeLandmarkFrame,
+		"seq":            0,
+		"timestamp_ms":   1720252800000,
+		"features":       huge,
+	}
+	if err := conn.WriteJSON(msg); err != nil {
+		t.Fatalf("writing oversized frame: %v", err)
+	}
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, _, err := conn.ReadMessage(); err == nil {
+		t.Fatal("expected the server to close the connection after an oversized frame")
+	}
+}
+
+func TestConcurrentStreamCapPerUser(t *testing.T) {
+	aiStream := newFakeAIStream()
+	srv := httptest.NewServer(NewHandler(&fakeAIClient{stream: aiStream}, nil, nil))
+	defer srv.Close()
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+
+	var conns []*websocket.Conn
+	defer func() {
+		for _, c := range conns {
+			c.Close()
+		}
+	}()
+	for i := 0; i < maxStreamsPerUser; i++ {
+		conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+		if err != nil {
+			t.Fatalf("dial %d: %v", i, err)
+		}
+		conns = append(conns, conn)
+	}
+
+	// dialTestServer has no auth middleware, so every test connection
+	// authenticates as the same (zero-value) user — the cap must still bite.
+	_, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err == nil {
+		t.Fatal("expected the connection over the per-user cap to be rejected")
+	}
+	if resp == nil || resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 Too Many Requests, got resp=%+v err=%v", resp, err)
 	}
 }
 
@@ -259,5 +318,50 @@ func TestAIUnavailableReturnsProblem(t *testing.T) {
 	}
 	if ct := resp.Header.Get("Content-Type"); ct != "application/problem+json" {
 		t.Fatalf("expected problem+json, got %s", ct)
+	}
+}
+
+func TestAITransportErrorDetailIsSanitized(t *testing.T) {
+	srv := httptest.NewServer(NewHandler(
+		&fakeAIClient{openErr: errors.New("dial tcp 10.1.2.3:50051: connect: connection refused")},
+		nil, nil,
+	))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	var problem httpapi.Problem
+	if err := json.NewDecoder(resp.Body).Decode(&problem); err != nil {
+		t.Fatalf("decoding problem: %v", err)
+	}
+	if strings.Contains(problem.Detail, "10.1.2.3") || strings.Contains(problem.Detail, "dial tcp") {
+		t.Fatalf("internal error leaked to client: %q", problem.Detail)
+	}
+	if problem.Detail != "AI service connection error" {
+		t.Fatalf("unexpected detail: %q", problem.Detail)
+	}
+}
+
+func TestAIGRPCStatusMessagePassesThrough(t *testing.T) {
+	srv := httptest.NewServer(NewHandler(
+		&fakeAIClient{openErr: status.Error(codes.Unavailable, "no model loaded")},
+		nil, nil,
+	))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	var problem httpapi.Problem
+	if err := json.NewDecoder(resp.Body).Decode(&problem); err != nil {
+		t.Fatalf("decoding problem: %v", err)
+	}
+	if problem.Detail != "no model loaded" {
+		t.Fatalf("expected AI service status message to pass through, got %q", problem.Detail)
 	}
 }

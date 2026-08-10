@@ -248,7 +248,7 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 
 	// Clear cookies. Each must be cleared with the same Path it was set
 	// with — browsers key cookies by (name, domain, path).
-	secure := requestIsSecure(r)
+	secure := requestIsSecure(r, h.trustProxy)
 	clearCookie(w, "signmind_access", "/", secure)
 	clearCookie(w, "signmind_refresh", refreshCookiePath, secure)
 
@@ -441,7 +441,7 @@ func (h *Handler) issueTokens(w http.ResponseWriter, r *http.Request, user User)
 	}
 
 	// Set HttpOnly cookies for webui.
-	setTokenCookies(w, accessToken, refreshToken, requestIsSecure(r))
+	setTokenCookies(w, accessToken, refreshToken, requestIsSecure(r, h.trustProxy))
 
 	writeJSON(w, authResponse{
 		AccessToken:  accessToken,
@@ -455,12 +455,17 @@ func (h *Handler) issueTokens(w http.ResponseWriter, r *http.Request, user User)
 const refreshCookiePath = "/api/v1/auth/"
 
 // requestIsSecure reports whether the request arrived over HTTPS, directly
-// (TLS) or via a reverse proxy (X-Forwarded-Proto). Browsers drop
-// Secure cookies on plain-HTTP origins other than localhost, so marking
-// cookies Secure unconditionally breaks webui login on LAN deployments.
-func requestIsSecure(r *http.Request) bool {
-	return r.TLS != nil ||
-		strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+// (TLS) or via a reverse proxy (X-Forwarded-Proto, honored only when
+// trustProxy is set — same gate as clientIP's X-Forwarded-For, since a
+// client that isn't behind the trusted proxy could otherwise set this
+// header itself). Browsers drop Secure cookies on plain-HTTP origins other
+// than localhost, so marking cookies Secure unconditionally breaks webui
+// login on LAN deployments.
+func requestIsSecure(r *http.Request, trustProxy bool) bool {
+	if r.TLS != nil {
+		return true
+	}
+	return trustProxy && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
 func setTokenCookies(w http.ResponseWriter, access, refresh string, secure bool) {

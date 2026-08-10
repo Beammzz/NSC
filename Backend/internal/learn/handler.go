@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -519,6 +520,58 @@ func extractVideoURLFromThslHTML(html, pageURL string) string {
 	return rawURL
 }
 
+// thslAllowedHosts restricts the admin-supplied page URL to the site this
+// import feature exists for. Without this, importFromThsl is an SSRF
+// primitive: it fetches any URL an admin submits and echoes response
+// content back (word/error text, resolved video_url), which is an oracle
+// for probing internal services.
+var thslAllowedHosts = map[string]bool{
+	"th-sl.com":     true,
+	"www.th-sl.com": true,
+}
+
+// thslFetchClient additionally blocks DNS names (the page URL's host, and
+// any video URL the page HTML points at) that resolve to a private,
+// loopback, link-local, or otherwise non-public address — defense in depth
+// against DNS rebinding, since the host allow-list alone only checks the
+// page URL, not the video URL extracted from its HTML.
+var thslFetchClient = &http.Client{
+	Transport: &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+			ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
+			if err != nil {
+				return nil, err
+			}
+			if len(ips) == 0 {
+				return nil, fmt.Errorf("no addresses found for %s", host)
+			}
+			for _, ip := range ips {
+				if !isPublicIP(ip) {
+					return nil, fmt.Errorf("refusing to dial non-public address %s", ip)
+				}
+			}
+			// Dial the already-validated IP directly — dialing addr again
+			// would re-resolve the hostname, reopening the DNS-rebinding gap
+			// this check exists to close.
+			dialer := &net.Dialer{}
+			return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
+		},
+	},
+}
+
+func isPublicIP(ip net.IP) bool {
+	return !(ip.IsPrivate() ||
+		ip.IsLoopback() ||
+		ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() ||
+		ip.IsMulticast() ||
+		ip.IsUnspecified())
+}
+
 func (h *Handler) importFromThsl(w http.ResponseWriter, r *http.Request) {
 	if !h.extractor.Configured() {
 		httpapi.WriteProblem(w, httpapi.NewProblem(
@@ -549,6 +602,11 @@ func (h *Handler) importFromThsl(w http.ResponseWriter, r *http.Request) {
 			http.StatusBadRequest, "Invalid import URL", "url must start with http:// or https://"))
 		return
 	}
+	if parsed, err := url.Parse(pageURL); err != nil || !thslAllowedHosts[strings.ToLower(parsed.Hostname())] {
+		httpapi.WriteProblem(w, httpapi.NewProblem(
+			http.StatusBadRequest, "Invalid import URL", "url host must be th-sl.com"))
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), recordingTimeout)
 	defer cancel()
@@ -561,7 +619,7 @@ func (h *Handler) importFromThsl(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := thslFetchClient.Do(req)
 	if err != nil {
 		httpapi.WriteProblem(w, httpapi.NewProblem(
 			http.StatusBadGateway, "Failed to fetch th-sl page", err.Error()))
@@ -613,7 +671,7 @@ func (h *Handler) importFromThsl(w http.ResponseWriter, r *http.Request) {
 	}
 	vReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
 
-	vResp, err := http.DefaultClient.Do(vReq)
+	vResp, err := thslFetchClient.Do(vReq)
 	if err != nil {
 		httpapi.WriteProblem(w, httpapi.NewProblem(
 			http.StatusBadGateway, "Failed to download sign video", err.Error()))

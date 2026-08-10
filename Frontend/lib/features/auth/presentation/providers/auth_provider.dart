@@ -13,6 +13,12 @@ class AuthNotifier extends Notifier<AuthState> {
   }
 
   /// Converts a WebSocket/HTTP Server URL (e.g. https://signmind.harumi.dev) to HTTP base URL.
+  ///
+  /// A bare host with no scheme (e.g. "192.168.1.50:8080") defaults to
+  /// https:// — the login form's own hint text ("https://signmind.harumi.dev")
+  /// models a secure URL, so a typo-shaped bare host should not silently send
+  /// the password over plaintext HTTP. Typing http:// explicitly (a self-hosted
+  /// LAN/dev server without TLS) still works exactly as entered.
   String _toHttpUrl(String wsOrHttpUrl) {
     var trimmed = wsOrHttpUrl.trim();
     if (trimmed.startsWith('wss://')) {
@@ -22,7 +28,7 @@ class AuthNotifier extends Notifier<AuthState> {
       return 'http://${trimmed.substring(5)}';
     }
     if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
-      return 'http://$trimmed';
+      return 'https://$trimmed';
     }
     return trimmed;
   }

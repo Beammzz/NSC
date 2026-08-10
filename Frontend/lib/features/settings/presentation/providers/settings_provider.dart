@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:signmind/features/settings/domain/models/settings_models.dart';
 
@@ -7,6 +10,18 @@ import 'package:signmind/features/settings/domain/models/settings_models.dart';
 final sharedPreferencesProvider = Provider<SharedPreferences>((ref) {
   throw UnimplementedError('sharedPreferencesProvider must be overridden');
 });
+
+/// The Keychain/Keystore-backed store for the "remember me" password —
+/// SharedPreferences persists as plaintext XML/plist, unsuitable for a
+/// credential (see SettingsNotifier.savedPasswordSecureKey).
+final secureStorageProvider = Provider<FlutterSecureStorage>(
+  (ref) => const FlutterSecureStorage(),
+);
+
+/// The saved password loaded from secure storage at startup (secure reads
+/// are async; SettingsNotifier.build() is not) — overridden in main() (and
+/// in tests) with the loaded value, defaulting to none.
+final savedPasswordProvider = Provider<String?>((ref) => null);
 
 class SettingsNotifier extends Notifier<AppSettings> {
   static const _keyThemeMode = 'settings.themeMode';
@@ -22,9 +37,17 @@ class SettingsNotifier extends Notifier<AppSettings> {
   static const _keySimulatedStream = 'settings.useSimulatedStream';
   static const _keyRememberCredentials = 'settings.rememberCredentials';
   static const _keySavedEmail = 'settings.savedEmail';
-  static const _keySavedPassword = 'settings.savedPassword';
+
+  /// Pre-fix key: earlier app versions stored the saved password here, in
+  /// plaintext. main()'s startup migration moves any leftover value into
+  /// secure storage and deletes it from here.
+  static const savedPasswordPrefsKeyLegacy = 'settings.savedPassword';
+
+  /// Secure-storage key for the saved password.
+  static const savedPasswordSecureKey = 'settings.savedPassword.secure';
 
   SharedPreferences get _prefs => ref.read(sharedPreferencesProvider);
+  FlutterSecureStorage get _secureStorage => ref.read(secureStorageProvider);
 
   @override
   AppSettings build() {
@@ -64,7 +87,7 @@ class SettingsNotifier extends Notifier<AppSettings> {
       rememberCredentials:
           prefs.getBool(_keyRememberCredentials) ?? initial.rememberCredentials,
       savedEmail: prefs.getString(_keySavedEmail) ?? initial.savedEmail,
-      savedPassword: prefs.getString(_keySavedPassword) ?? initial.savedPassword,
+      savedPassword: ref.watch(savedPasswordProvider) ?? initial.savedPassword,
     );
   }
 
@@ -134,7 +157,7 @@ class SettingsNotifier extends Notifier<AppSettings> {
     if (!value) {
       state = state.copyWith(savedEmail: '', savedPassword: '');
       _prefs.remove(_keySavedEmail);
-      _prefs.remove(_keySavedPassword);
+      unawaited(_secureStorage.delete(key: savedPasswordSecureKey));
     }
   }
 
@@ -147,10 +170,12 @@ class SettingsNotifier extends Notifier<AppSettings> {
     _prefs.setBool(_keyRememberCredentials, remember);
     if (remember) {
       _prefs.setString(_keySavedEmail, email.trim());
-      _prefs.setString(_keySavedPassword, password);
+      unawaited(
+        _secureStorage.write(key: savedPasswordSecureKey, value: password),
+      );
     } else {
       _prefs.remove(_keySavedEmail);
-      _prefs.remove(_keySavedPassword);
+      unawaited(_secureStorage.delete(key: savedPasswordSecureKey));
     }
   }
 }

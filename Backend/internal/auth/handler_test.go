@@ -278,34 +278,61 @@ func TestLogoutClearsCookiesWithMatchingPaths(t *testing.T) {
 	}
 }
 
+func loginWithForwardedProto(t *testing.T, h *Handler, forwardedProto string) []*http.Cookie {
+	t.Helper()
+	var buf bytes.Buffer
+	_ = json.NewEncoder(&buf).Encode(loginRequest{Email: "sec@example.com", Password: "Password1"})
+	req := httptest.NewRequest("POST", "/api/v1/auth/login", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	if forwardedProto != "" {
+		req.Header.Set("X-Forwarded-Proto", forwardedProto)
+	}
+	rec := httptest.NewRecorder()
+	h.login(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login: expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	return rec.Result().Cookies()
+}
+
 func TestCookieSecureFollowsRequestScheme(t *testing.T) {
-	h := testHandler(t)
+	h := testHandler(t) // trustProxy=false
 	_, _ = h.store.CreateUser("sec@example.com", "Password1", RoleUser)
 
-	login := func(forwardedProto string) []*http.Cookie {
-		var buf bytes.Buffer
-		_ = json.NewEncoder(&buf).Encode(loginRequest{Email: "sec@example.com", Password: "Password1"})
-		req := httptest.NewRequest("POST", "/api/v1/auth/login", &buf)
-		req.Header.Set("Content-Type", "application/json")
-		if forwardedProto != "" {
-			req.Header.Set("X-Forwarded-Proto", forwardedProto)
-		}
-		rec := httptest.NewRecorder()
-		h.login(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("login: expected 200, got %d: %s", rec.Code, rec.Body.String())
-		}
-		return rec.Result().Cookies()
-	}
-
-	for _, c := range login("") {
+	for _, c := range loginWithForwardedProto(t, h, "") {
 		if c.Secure {
 			t.Fatalf("cookie %s: Secure set on plain-HTTP request", c.Name)
 		}
 	}
-	for _, c := range login("https") {
+}
+
+// TestCookieSecureIgnoresForwardedProtoWithoutTrustProxy is the regression
+// test for the X-Forwarded-Proto/X-Forwarded-For inconsistency: clientIP
+// already gated X-Forwarded-For behind trustProxy, but requestIsSecure
+// trusted X-Forwarded-Proto from ANY client. Any client not behind a real
+// reverse proxy could self-report "https" and flip Secure on — a
+// self-limiting bug today, but a real gap if a proxy is later placed in
+// front that appends rather than overwrites the header.
+func TestCookieSecureIgnoresForwardedProtoWithoutTrustProxy(t *testing.T) {
+	h := testHandler(t) // trustProxy=false
+	_, _ = h.store.CreateUser("sec@example.com", "Password1", RoleUser)
+
+	for _, c := range loginWithForwardedProto(t, h, "https") {
+		if c.Secure {
+			t.Fatalf("cookie %s: Secure set from a client-supplied X-Forwarded-Proto with trustProxy=false", c.Name)
+		}
+	}
+}
+
+func TestCookieSecureHonorsForwardedProtoWithTrustProxy(t *testing.T) {
+	s := testStore(t)
+	secret := []byte("test-secret-32-bytes-long-enough")
+	h := NewHandler(s, secret, true, true, NewRateLimiter(5, time.Minute), NewRateLimiter(10, 24*time.Hour))
+	_, _ = h.store.CreateUser("sec@example.com", "Password1", RoleUser)
+
+	for _, c := range loginWithForwardedProto(t, h, "https") {
 		if !c.Secure {
-			t.Fatalf("cookie %s: Secure missing on forwarded-HTTPS request", c.Name)
+			t.Fatalf("cookie %s: Secure missing on forwarded-HTTPS request behind a trusted proxy", c.Name)
 		}
 	}
 }

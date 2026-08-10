@@ -642,7 +642,11 @@ func intParam(raw string, fallback int) (int, error) {
 	return n, nil
 }
 
-// grpcProblem maps a gRPC error onto an RFC 7807 problem.
+// grpcProblem maps a gRPC error onto an RFC 7807 problem. A genuine gRPC
+// status uses the AI service's own message (safe — text the service chose
+// to send); anything else (a raw transport/dial error) is reduced to a
+// fixed detail so internal network topology never reaches the client — the
+// real error, including op, is still logged server-side.
 func grpcProblem(op string, err error) httpapi.Problem {
 	if s, ok := status.FromError(err); ok {
 		switch s.Code() {
@@ -657,6 +661,7 @@ func grpcProblem(op string, err error) httpapi.Problem {
 				"AI service unavailable", s.Message())
 		}
 	}
+	log.Printf("admin: %s: %v", op, err)
 	return httpapi.NewProblem(http.StatusBadGateway,
-		"AI service error", op+": "+err.Error())
+		"AI service error", "AI service connection error")
 }

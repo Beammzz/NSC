@@ -76,7 +76,6 @@ void main() {
       'settings.useSimulatedStream': false,
       'settings.rememberCredentials': true,
       'settings.savedEmail': 'testuser@signmind.local',
-      'settings.savedPassword': 'secretpassword',
     });
     final prefs = await SharedPreferences.getInstance();
 
@@ -84,6 +83,10 @@ void main() {
       ProviderScope(
         overrides: [
           sharedPreferencesProvider.overrideWithValue(prefs),
+          // The saved password now lives in secure storage, loaded async in
+          // main() before ProviderScope is built — tests inject the loaded
+          // value the same way, rather than through SharedPreferences.
+          savedPasswordProvider.overrideWithValue('secretpassword'),
         ],
         child: const MaterialApp(home: LoginScreen()),
       ),

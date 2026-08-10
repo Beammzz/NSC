@@ -455,6 +455,115 @@ Completed app icon update and installation across both native mobile launcher an
 - [x] Step 2: Update `login_screen.dart`, `landing_screen.dart`, `scanner_screen.dart`, `settings_screen.dart` with `Image.asset('assets/icons/app_icon.png')` and verify via `flutter analyze && flutter test`.
 - [x] Step 3: Replace `app_icon.png` with provided sign-language outline icon, regenerate `flutter_launcher_icons`, rebuild release APK (`app-release.apk`), and install via `adb`.
 
+## Goal (2026-08-10): fix all monorepo security/bug audit findings, in severity order
+User: "Fix all in order based on how critical it is" — following a 3-subsystem parallel-agent
+security audit (Go backend, Flutter frontend, Python inference) this same session. 18 findings
+ranked Critical/High/Medium/Low.
+DONE (Critical, all VERIFIED — RESULT: `pytest -q` Inference_backend "76 passed in 0.80s",
+`go vet ./... && go test ./...` Backend all ok):
+1. Inference_backend gRPC service had zero auth (server.py add_insecure_port, no interceptors) —
+   any network client could UploadModel/SetTuning/StreamLogs. FIX: new
+   inference/auth_interceptor.py SharedSecretInterceptor (metadata key
+   x-signmind-shared-secret, hmac.compare_digest); wired via build_server(shared_secret=...) in
+   server.py, enforced only when SIGNMIND_AI_SHARED_SECRET is set (warns loudly if unset).
+   Go side: Backend/internal/stream/ai_client.go sharedSecretCreds (PerRPCCredentials, applies to
+   ALL RPCs incl. admin's aiClient.Raw() since it's channel-wide); config.AISharedSecret
+   (env SIGNMIND_AI_SHARED_SECRET); main.go resolveAISharedSecret fails fast in Prod if unset,
+   like resolveJWTSecret. dev.ps1 generates+exports a fresh secret for both child processes.
+2. engine.py activate_artifacts cast confidence_threshold to float() AFTER the model/config were
+   already swapped and OUTSIDE the try/except — a non-numeric value left a broken model live,
+   uncaught. FIX: tsl_preprocess._validate_config (confidence_threshold/target_fps/
+   sequence_length range+type checked) runs inside load_preprocess_config, so bad values raise
+   ValueError BEFORE activate_artifacts's try block even reaches load_model — rollback path
+   already existed, just never reached.
+3. Same validation closes target_fps<=0: previously unchecked, persisted via active_model.json,
+   crashed every subsequent stream (ZeroDivisionable at 1000.0/target_fps in
+   InferenceSession.add_frame) — permanent DoS surviving restart. Now rejected at UploadModel time.
+DONE (High, Go VERIFIED — RESULT: go test ./internal/stream/... -race ok, all 4 new tests pass):
+4. No conn.SetReadLimit on /api/v1/stream — one oversized WS frame could OOM the process. FIX:
+   handler.go maxClientMessageBytes=64KiB via conn.SetReadLimit right after Upgrade.
+5. No cap on concurrent /api/v1/stream connections (signup is public by default) — resource
+   exhaustion DoS from any account. FIX: handler.go connLimiter (mutex+map), maxStreamsPerUser=4,
+   maxStreamsTotal=500, acquire/release around ServeHTTP keyed on auth.ClaimsFromContext(...).Sub;
+   429 RFC7807 problem on rejection.
+DONE (High, Flutter EDITED-UNVERIFIED — no flutter SDK in this sandbox; needs
+`cd Frontend && flutter analyze && flutter test` to confirm):
+6. Saved login password stored in plaintext SharedPreferences, rememberCredentials defaults true.
+   FIX: added flutter_secure_storage: ^9.2.4 dep. settings_provider.dart: new
+   secureStorageProvider/savedPasswordProvider; SettingsNotifier reads password via
+   ref.watch(savedPasswordProvider) (loaded async, unlike sync build()); writes go through
+   _secureStorage.write/delete (unawaited, fire-and-forget from sync Notifier methods). main.dart:
+   _migrateSavedPassword reads any legacy plaintext value at startup, moves it into secure
+   storage, deletes the old prefs key, then loads+overrides savedPasswordProvider before runApp.
+   Updated test/features/auth/presentation/login_screen_test.dart's 3rd test to override
+   savedPasswordProvider instead of seeding the now-dead SharedPreferences key.
+   NOTED (not done): rememberCredentials default stays `true` — now safe since storage is secure;
+   changing the default would be a UX call outside this security fix's scope.
+7. android:allowBackup was unset (defaults true), no dataExtractionRules — adb backup/cloud
+   backup could extract the plaintext password even before finding #6. FIX: AndroidManifest.xml
+   `android:allowBackup="false"` on <application>. XML validated via `xmllint --noout`.
+VERIFICATION GAP: no Flutter SDK, no pwsh, no Android/iOS toolchain in this sandbox — Flutter and
+dev.ps1 changes are code-reviewed carefully (matched existing SharedPreferences-override pattern
+in main.dart; flutter_secure_storage API is the well-known stable read/write/delete) but NOT
+executed. Go and Python changes ARE executed and verified (see RESULT lines above).
+DONE (Medium, 5 of 6 — Go VERIFIED via go vet/go test, Flutter EDITED-UNVERIFIED, same gap as
+above; 6th item SKIPPED, see conflict below):
+8. Go SSRF in learn/handler.go importFromThsl (admin-gated th-sl.com sign import fetched any
+   admin-supplied URL, echoing content back). FIX: thslAllowedHosts allow-list (th-sl.com/
+   www.th-sl.com only) checked on pageURL before fetching; thslFetchClient custom
+   http.Transport.DialContext resolves the host itself and rejects non-public IPs (private/
+   loopback/link-local/multicast/unspecified via isPublicIP) before dialing — closes DNS
+   rebinding, covers the video URL too (which may legitimately be a different domain, so it's
+   IP-gated rather than host-allow-listed). Tests override the package-level vars for the
+   existing loopback-mock-server test; new TestImportFromThslRejectsNonAllowedHost +
+   TestIsPublicIP with the real production vars.
+9. Go internal gRPC error strings relayed verbatim (stream/handler.go 4 sites, admin/handler.go
+   grpcProblem fallback) — leaked dial/transport errors (addresses, "connection refused") to
+   clients. FIX: new aiProblem()/fixed grpcProblem() use the gRPC status message when the error
+   is a genuine status.FromError() (safe, AI-service-chosen text); anything else -> fixed "AI
+   service connection error" detail, real error still log.Printf'd server-side.
+10. Flutter cleartext http/ws fallback in auth_provider.dart _toHttpUrl / tsl_stream_service.dart
+    _streamUri — a bare host (no scheme) silently defaulted to http/ws. FIX: bare host now
+    defaults to https/wss (matches the login field's own hint text "https://signmind.harumi.dev");
+    explicit http:// or ws:// still works unchanged for self-hosted LAN/dev servers.
+11. Flutter scanner state (recognized sentence) surviving logout on a shared device. FIX:
+    scanner_provider.dart ScannerNotifier.build() now watches
+    authProvider.select((s) => s.isAuthenticated); _savedState is cleared whenever unauthenticated.
+12. Python unbounded upload retention in inference/server.py UploadModel — every accepted upload
+    grew disk forever. FIX: MAX_RETAINED_UPLOADS=5 + _prune_old_uploads() (lexicographic ==
+    chronological, since dir names are UTC timestamps) called after a successful
+    activate_artifacts; always keeps the currently-active dir.
+SKIPPED (conflict, see Open items): Flutter refresh-token flow.
+DONE (Low, all 5 — Go VERIFIED, Python VERIFIED, Flutter EDITED-UNVERIFIED):
+13. Go LLM API key plaintext at rest (llm/store.go). FIX: AES-256-GCM, key = SHA-256("signmind-
+    llm-apikey-v1" + jwtSecret) via new DeriveEncryptionKey (domain-separated, not raw JWT bytes
+    reused). Store.Open/OpenWith signatures gained an encKey param (RS done — updated
+    cmd/server/main.go, admin/handler_test.go, llm/store_test.go openTemp). CAVEAT documented in
+    main.go: Dev mode with no SIGNMIND_JWT_SECRET set regenerates jwtSecret every restart (same
+    tradeoff Dev already accepts for login sessions), so a saved LLM key needs re-entering after
+    each Dev restart; Prod is stable (JWTSecret required, fatal if unset). New
+    TestAPIKeyIsNotStoredInPlaintext asserts the raw DB column isn't/doesn't contain the plaintext
+    key and that a differently-derived key can't decrypt it.
+14. Go X-Forwarded-Proto trusted unconditionally while clientIP's X-Forwarded-For was correctly
+    gated on trustProxy. FIX: requestIsSecure(r, trustProxy) — proto header only honored when
+    trustProxy is true, mirroring clientIP. New tests split the old
+    TestCookieSecureFollowsRequestScheme into 3: default(no header)/ignores-forwarded-without-
+    trustProxy/honors-forwarded-with-trustProxy.
+15. Python NaN/Infinity landmark floats unvalidated before feeding the model. FIX:
+    np.isfinite(position).all() check in StreamInference, INVALID_ARGUMENT abort otherwise (same
+    pattern as the existing feature-count check). Tests: nan + inf frames rejected.
+16. Flutter HttpLearnRepository._request had no timeout (could hang the Learn tab forever). FIX:
+    mirrors auth_provider.dart's _postWithTimeout pattern — client.connectionTimeout +
+    .timeout(10s) wrapping the extracted _performRequest, TimeoutException on expiry.
+VERIFICATION GAP (unchanged): no Flutter SDK, no pwsh, no Android/iOS toolchain in this sandbox —
+every Flutter/dev.ps1 change above is EDITED-UNVERIFIED. Go: `go vet ./... && go test ./...` all
+ok after every fix (last full run confirmed here). Python: `ruff check . && pytest -q` -> "79
+passed" after every fix (last full run confirmed here).
+Files changed (git diff --stat HEAD, package-lock.json churn from an unrelated `npm install` was
+reverted): 32 files, +1117/-101. New: Backend/internal/stream/ai_client_test.go,
+Inference_backend/inference/auth_interceptor.py. All uncommitted per the Constraints below (user
+has not asked to commit in this task's conversation).
+
 ## Constraints
 - Do not git push (user has never asked for a push).
 - Do not commit until the user asks; whole tree deliberately uncommitted.
@@ -482,9 +591,12 @@ Completed app icon update and installation across both native mobile launcher an
   dictionary sign sheet.
 
 ## Open items
-- Medium/minor review findings deliberately NOT in scope: Flutter token refresh/persistence,
-  admin-signup cookie footgun, dangling CountSignupsByIP comment, >72-byte password 500,
-  putTuning missing 401-retry.
+- Medium/minor review findings deliberately NOT in scope (2026-07 decision, unrelated JWT-review
+  session): Flutter token refresh/persistence, admin-signup cookie footgun, dangling
+  CountSignupsByIP comment, >72-byte password 500, putTuning missing 401-retry.
+  CONFLICT (2026-08-10): today's "fix all in order of criticality" 18-item audit independently
+  flagged "Flutter refresh-token flow" as Medium-severity — same underlying gap this line already
+  deferred. Not auto-resolved; asked the user which instruction wins before touching it.
 
 ## Goal (2026-07-25): cartoon sign avatar (done, uncommitted)
 User: avatar "is kinda like nothing but show hand keypoint as dot and face is just circle" —
