@@ -36,6 +36,36 @@ class TestConfig:
         with pytest.raises(ValueError, match="JSON object"):
             tp.load_preprocess_config(str(tmp_path))
 
+    def test_out_of_range_confidence_threshold_raises(self, tmp_path):
+        (tmp_path / tp.CONFIG_FILENAME).write_text(
+            json.dumps({"confidence_threshold": "not-a-number"}), encoding="utf-8"
+        )
+        with pytest.raises(ValueError, match="confidence_threshold"):
+            tp.load_preprocess_config(str(tmp_path))
+
+    def test_zero_target_fps_raises(self, tmp_path):
+        # A live engine divides 1000.0 / target_fps per frame (engine.py
+        # InferenceSession.add_frame) — zero/negative must never reach it.
+        (tmp_path / tp.CONFIG_FILENAME).write_text(
+            json.dumps({"target_fps": 0}), encoding="utf-8"
+        )
+        with pytest.raises(ValueError, match="target_fps"):
+            tp.load_preprocess_config(str(tmp_path))
+
+    def test_negative_target_fps_raises(self, tmp_path):
+        (tmp_path / tp.CONFIG_FILENAME).write_text(
+            json.dumps({"target_fps": -12}), encoding="utf-8"
+        )
+        with pytest.raises(ValueError, match="target_fps"):
+            tp.load_preprocess_config(str(tmp_path))
+
+    def test_non_positive_sequence_length_raises(self, tmp_path):
+        (tmp_path / tp.CONFIG_FILENAME).write_text(
+            json.dumps({"sequence_length": 0}), encoding="utf-8"
+        )
+        with pytest.raises(ValueError, match="sequence_length"):
+            tp.load_preprocess_config(str(tmp_path))
+
 
 class TestFeatureDim:
     def test_default_is_441(self):

@@ -96,7 +96,7 @@ func testServer(t *testing.T, ai *fakeAI, env string) (*httptest.Server, *predlo
 		t.Fatalf("opening store: %v", err)
 	}
 	t.Cleanup(func() { store.Close() })
-	llmStore, err := llm.Open(filepath.Join(dir, "llm.db"))
+	llmStore, err := llm.Open(filepath.Join(dir, "llm.db"), llm.DeriveEncryptionKey([]byte("test-jwt-secret")))
 	if err != nil {
 		t.Fatalf("opening llm store: %v", err)
 	}

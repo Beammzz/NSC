@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -283,28 +284,48 @@ class HttpLearnRepository implements LearnRepository {
 
   HttpLearnRepository({required this.baseUrl, this.accessToken});
 
+  // A server that accepts the TCP connection but never responds (or a dead
+  // custom IP) would otherwise hang this call indefinitely — every caller
+  // (fetchTopics, fetchProgress, recordAttempt, ...) awaits it directly, so
+  // an unbounded hang stalls whatever FutureProvider/AsyncNotifier called in.
+  static const _requestTimeout = Duration(seconds: 10);
+
   Future<dynamic> _request(String method, String path, {Object? body}) async {
     final client = HttpClient();
+    client.connectionTimeout = _requestTimeout;
     try {
-      final uri = Uri.parse('$baseUrl$path');
-      final request = await client.openUrl(method, uri);
-      request.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
-      if (accessToken != null && accessToken!.isNotEmpty) {
-        request.headers
-            .set(HttpHeaders.authorizationHeader, 'Bearer $accessToken');
-      }
-      if (body != null) {
-        request.write(jsonEncode(body));
-      }
-      final response = await request.close();
-      final text = await response.transform(utf8.decoder).join();
-      if (response.statusCode != 200) {
-        throw Exception('Server error: ${response.statusCode}');
-      }
-      return jsonDecode(text);
+      return await _performRequest(client, method, path, body).timeout(
+        _requestTimeout,
+        onTimeout: () =>
+            throw TimeoutException('เซิร์ฟเวอร์ไม่ตอบสนองภายใน 10 วินาที'),
+      );
     } finally {
-      client.close();
+      client.close(force: true);
     }
+  }
+
+  Future<dynamic> _performRequest(
+    HttpClient client,
+    String method,
+    String path,
+    Object? body,
+  ) async {
+    final uri = Uri.parse('$baseUrl$path');
+    final request = await client.openUrl(method, uri);
+    request.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
+    if (accessToken != null && accessToken!.isNotEmpty) {
+      request.headers
+          .set(HttpHeaders.authorizationHeader, 'Bearer $accessToken');
+    }
+    if (body != null) {
+      request.write(jsonEncode(body));
+    }
+    final response = await request.close();
+    final text = await response.transform(utf8.decoder).join();
+    if (response.statusCode != 200) {
+      throw Exception('Server error: ${response.statusCode}');
+    }
+    return jsonDecode(text);
   }
 
   @override

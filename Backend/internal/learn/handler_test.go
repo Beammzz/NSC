@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -516,6 +517,13 @@ func TestAdminSignRecordingUnknownWordNoCategory(t *testing.T) {
 }
 
 func TestAdminImportFromThsl(t *testing.T) {
+	// importFromThsl only fetches th-sl.com by design (SSRF guard); point it
+	// at the loopback mock servers this test spins up instead.
+	origHosts, origClient := thslAllowedHosts, thslFetchClient
+	t.Cleanup(func() { thslAllowedHosts, thslFetchClient = origHosts, origClient })
+	thslAllowedHosts = map[string]bool{"127.0.0.1": true}
+	thslFetchClient = http.DefaultClient
+
 	fx := &fakeExtractor{configured: true, frames: json.RawMessage(`[[{"x":0.5,"y":0.5,"z":0}]]`)}
 	srv, _, adminToken, store := testServerExt(t, fx)
 
@@ -585,6 +593,44 @@ func TestAdminImportFromThsl(t *testing.T) {
 	}
 	if fx.gotExt != ".mp4" || fx.gotBytes == 0 {
 		t.Errorf("fakeExtractor ext=%q bytes=%d", fx.gotExt, fx.gotBytes)
+	}
+}
+
+func TestImportFromThslRejectsNonAllowedHost(t *testing.T) {
+	// Uses the real (unmodified) production thslAllowedHosts — importFromThsl
+	// must refuse to fetch anything outside th-sl.com, including internal/
+	// cloud-metadata-shaped targets, before it ever opens a connection.
+	srv, _, adminToken, _ := testServer(t)
+	resp := doJSON(t, "POST", srv.URL+"/api/v1/admin/learn/signs/import-thsl", adminToken,
+		`{"url": "http://169.254.169.254/latest/meta-data/"}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("import-thsl non-th-sl host: status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestIsPublicIP(t *testing.T) {
+	cases := []struct {
+		ip     string
+		public bool
+	}{
+		{"8.8.8.8", true},
+		{"1.1.1.1", true},
+		{"127.0.0.1", false},
+		{"10.0.0.5", false},
+		{"172.16.0.5", false},
+		{"192.168.1.1", false},
+		{"169.254.169.254", false}, // link-local — cloud metadata endpoints
+		{"::1", false},
+		{"0.0.0.0", false},
+	}
+	for _, c := range cases {
+		ip := net.ParseIP(c.ip)
+		if ip == nil {
+			t.Fatalf("invalid test IP %q", c.ip)
+		}
+		if got := isPublicIP(ip); got != c.public {
+			t.Errorf("isPublicIP(%s) = %v, want %v", c.ip, got, c.public)
+		}
 	}
 }
 

@@ -26,6 +26,7 @@ import numpy as np
 
 import tsl_preprocess
 from inference import logstream
+from inference.auth_interceptor import SharedSecretInterceptor
 from inference.engine import (
     LABEL_MAP_FILENAME,
     MODEL_FILENAME,
@@ -46,6 +47,13 @@ UPLOADS_DIRNAME = "uploads"
 # Reject uploads whose declared or actual size exceeds this (a full-precision
 # LSTM .tflite is a few MB; 512 MiB is far beyond any legitimate model).
 MAX_UPLOAD_BYTES = 512 * 1024 * 1024
+# Accepted-upload directories kept under uploads/ (each up to 3 files x
+# MAX_UPLOAD_BYTES). Rejected uploads are already cleaned up immediately by
+# fail() below; without this cap, every successful UploadModel call grows
+# disk usage forever. The most recent MAX_RETAINED_UPLOADS survive, which
+# always includes the currently active one (its directory name — a UTC
+# timestamp — sorts last).
+MAX_RETAINED_UPLOADS = 5
 
 _KIND_TO_FILENAME = {
     pb.FILE_KIND_TFLITE_MODEL: MODEL_FILENAME,
@@ -85,6 +93,11 @@ class TslInferenceServicer(pb_grpc.TslInferenceServicer):
             position = np.asarray(
                 frame.features[: tsl_preprocess.POSITION_DIMS], dtype=np.float32
             )
+            if not np.all(np.isfinite(position)):
+                context.abort(
+                    grpc.StatusCode.INVALID_ARGUMENT,
+                    "features must be finite (no NaN/Infinity)",
+                )
             try:
                 result = session.add_frame(position, frame.timestamp_ms)
             except RuntimeError as exc:  # model hot-swapped mid-stream
@@ -210,6 +223,10 @@ class TslInferenceServicer(pb_grpc.TslInferenceServicer):
         except ModelLoadError as exc:
             fail(grpc.StatusCode.INVALID_ARGUMENT, f"uploaded model rejected: {exc}")
 
+        _prune_old_uploads(
+            os.path.join(self._engine.output_dir, UPLOADS_DIRNAME), MAX_RETAINED_UPLOADS
+        )
+
         num_classes, sequence_len, feature_dim = self._engine.model_info()
         logger.info(
             "UploadModel: new model live (%d classes, window %d, features %d)",
@@ -287,6 +304,23 @@ class TslInferenceServicer(pb_grpc.TslInferenceServicer):
         )
 
 
+def _prune_old_uploads(uploads_dir: str, keep: int) -> None:
+    """Delete the oldest accepted-upload directories beyond *keep*.
+
+    Directory names are UTC timestamps (see UploadModel's staging_dir), so
+    lexicographic order is chronological order.
+    """
+    try:
+        entries = sorted(
+            (e.path for e in os.scandir(uploads_dir) if e.is_dir()),
+        )
+    except OSError:
+        return
+    stale = entries[:-keep] if keep > 0 else entries
+    for path in stale:
+        shutil.rmtree(path, ignore_errors=True)
+
+
 def _log_entry(event: logstream.LogEvent) -> "pb.LogEntry":
     return pb.LogEntry(
         timestamp_ms=event.timestamp_ms,
@@ -301,9 +335,22 @@ def build_server(
     broadcaster: logstream.LogBroadcaster,
     addr: str,
     max_workers: int = 10,
+    shared_secret: str | None = None,
 ) -> tuple[grpc.Server, int]:
-    """Wire the servicer into an (unstarted) server; returns (server, port)."""
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=max_workers))
+    """Wire the servicer into an (unstarted) server; returns (server, port).
+
+    shared_secret, when set, requires every RPC to carry a matching
+    x-signmind-shared-secret metadata entry (see auth_interceptor.py) —
+    otherwise this gRPC service accepts calls from any network client that
+    can reach addr.
+    """
+    interceptors = []
+    if shared_secret:
+        interceptors.append(SharedSecretInterceptor(shared_secret))
+    server = grpc.server(
+        futures.ThreadPoolExecutor(max_workers=max_workers),
+        interceptors=interceptors,
+    )
     pb_grpc.add_TslInferenceServicer_to_server(
         TslInferenceServicer(engine, broadcaster), server
     )
@@ -324,7 +371,16 @@ def main() -> None:
 
     engine = InferenceEngine()
     addr = os.environ.get("SIGNMIND_AI_ADDR", "localhost:50051")
-    server, port = build_server(engine, broadcaster, addr)
+    shared_secret = os.environ.get("SIGNMIND_AI_SHARED_SECRET", "")
+    if not shared_secret:
+        logger.warning(
+            "SIGNMIND_AI_SHARED_SECRET is not set — this gRPC service is "
+            "UNAUTHENTICATED. Any client that can reach %s can replace the "
+            "live model, change tuning, or read live logs. Set it (and the "
+            "matching value on the Go backend) outside local dev.",
+            addr,
+        )
+    server, port = build_server(engine, broadcaster, addr, shared_secret=shared_secret)
     server.start()
     logger.info("TslInference gRPC server listening on %s (port %d)", addr, port)
 

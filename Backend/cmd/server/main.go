@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"errors"
@@ -52,8 +53,17 @@ func main() {
 		log.Fatalf("opening prediction log: %v", err)
 	}
 
+	// jwtSecret is resolved before the LLM store, which needs it to derive
+	// the key encrypting the saved LLM API key at rest. In Prod this is
+	// stable (required, fatal if unset — see resolveJWTSecret), so the
+	// derived key is stable too. In Dev with no SIGNMIND_JWT_SECRET set,
+	// jwtSecret is freshly random every restart (same tradeoff Dev already
+	// accepts for login sessions), so a saved LLM key must be re-entered
+	// after each restart in that mode.
+	jwtSecret := resolveJWTSecret(cfg)
+
 	// LLM sentence composition: settings + request log share the same DB.
-	llmStore, err := llm.OpenWith(db)
+	llmStore, err := llm.OpenWith(db, llm.DeriveEncryptionKey(jwtSecret))
 	if err != nil {
 		log.Fatalf("opening llm store: %v", err)
 	}
@@ -65,7 +75,6 @@ func main() {
 		log.Fatalf("opening auth store: %v", err)
 	}
 
-	jwtSecret := resolveJWTSecret(cfg)
 	seedAdmin(authStore, cfg)
 
 	loginRL := auth.NewRateLimiter(5, time.Minute)
@@ -79,7 +88,8 @@ func main() {
 	}
 
 	// ---- AI client ----
-	aiClient, err := stream.NewGRPCClient(cfg.AIAddr)
+	aiSharedSecret := resolveAISharedSecret(cfg)
+	aiClient, err := stream.NewGRPCClient(cfg.AIAddr, aiSharedSecret)
 	if err != nil {
 		log.Fatalf("creating AI client: %v", err)
 	}
@@ -205,8 +215,24 @@ func resolveJWTSecret(cfg config.Config) []byte {
 	if err != nil {
 		log.Fatalf("generating dev JWT secret: %v", err)
 	}
-	log.Printf("auth: dev mode — auto-generated JWT secret: %s", hex.EncodeToString(secret))
+	fingerprint := sha256.Sum256(secret)
+	log.Printf("auth: dev mode — auto-generated JWT secret (fingerprint %s)",
+		hex.EncodeToString(fingerprint[:4]))
 	return secret
+}
+
+// resolveAISharedSecret loads the metadata secret sent on every RPC to the
+// Python AI service (see internal/stream/ai_client.go). Required in Prod;
+// empty in Dev matches the AI service's own unauthenticated dev fallback.
+func resolveAISharedSecret(cfg config.Config) string {
+	if cfg.AISharedSecret != "" {
+		return cfg.AISharedSecret
+	}
+	if !cfg.IsDev() {
+		log.Fatal("SIGNMIND_AI_SHARED_SECRET is required in Prod — set it in .env or the environment (must match the Python service's SIGNMIND_AI_SHARED_SECRET)")
+	}
+	log.Printf("ai: dev mode — SIGNMIND_AI_SHARED_SECRET unset; the gRPC link to the AI service is UNAUTHENTICATED")
+	return ""
 }
 
 // seedAdmin creates the initial admin account from config if no admin exists.

@@ -69,6 +69,16 @@ Write-Host ''
 # Env consumed by backend/internal/config.
 $env:SIGNMIND_HTTP_ADDR = $HttpAddr
 $env:SIGNMIND_AI_ADDR   = $aiAddr
+# Shared secret authenticating the Go backend to the Python gRPC service
+# (inference/auth_interceptor.py) — generated fresh per dev-stack run and
+# exported to both child processes so their env vars always match.
+# RNGCryptoServiceProvider (not the newer RandomNumberGenerator.GetBytes
+# static, .NET 6+ only) + manual hex formatting (not Convert.ToHexString,
+# .NET 5+ only) keep this working under Windows PowerShell 5.1 (.NET
+# Framework), the minimum version this script declares.
+$secretBytes = New-Object byte[] 32
+[System.Security.Cryptography.RNGCryptoServiceProvider]::new().GetBytes($secretBytes)
+$env:SIGNMIND_AI_SHARED_SECRET = -join ($secretBytes | ForEach-Object { $_.ToString('x2') })
 # Sign-recording keypoint extractor (admin webui): the same x64 venv Python
 # (with MediaPipe) runs Inference_backend/extract_keypoints.py to turn an
 # uploaded clip into avatar frames. Unset -> recording uploads return 503
@@ -117,9 +127,10 @@ finally {
     Write-Host ''
     Write-Step "shutting down..."
     Stop-All
-    Remove-Item Env:\SIGNMIND_HTTP_ADDR      -ErrorAction SilentlyContinue
-    Remove-Item Env:\SIGNMIND_AI_ADDR        -ErrorAction SilentlyContinue
-    Remove-Item Env:\SIGNMIND_KEYPOINT_PY    -ErrorAction SilentlyContinue
-    Remove-Item Env:\SIGNMIND_EXTRACT_SCRIPT -ErrorAction SilentlyContinue
+    Remove-Item Env:\SIGNMIND_HTTP_ADDR        -ErrorAction SilentlyContinue
+    Remove-Item Env:\SIGNMIND_AI_ADDR          -ErrorAction SilentlyContinue
+    Remove-Item Env:\SIGNMIND_AI_SHARED_SECRET -ErrorAction SilentlyContinue
+    Remove-Item Env:\SIGNMIND_KEYPOINT_PY      -ErrorAction SilentlyContinue
+    Remove-Item Env:\SIGNMIND_EXTRACT_SCRIPT   -ErrorAction SilentlyContinue
     Write-Step "stopped."
 }

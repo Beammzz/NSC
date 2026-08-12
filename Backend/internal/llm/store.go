@@ -6,9 +6,16 @@
 package llm
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -68,8 +75,10 @@ const DefaultSystemPrompt = `คุณคือระบบเรียบเร
    ถ้าไม่มีคำปฏิเสธหรือคำถามในลำดับที่ได้รับ ประโยคผลลัพธ์ต้องไม่มีเช่นกัน
 6. ตอบกลับเป็นประโยคเดียวเท่านั้น ห้ามอธิบาย ห้ามใส่เครื่องหมายคำพูดหรือ markdown`
 
-// Settings is the full LLM configuration. APIKey is stored in the clear in
-// the server-side database; the admin API masks it on read.
+// Settings is the full LLM configuration. APIKey is stored AES-256-GCM
+// encrypted at rest (see Store.encKey / DeriveEncryptionKey) and decrypted
+// on read here; the admin API additionally masks it before it ever reaches
+// an HTTP response.
 type Settings struct {
 	Enabled          bool    `json:"enabled"`
 	Endpoint         string  `json:"endpoint"`
@@ -126,11 +135,26 @@ const (
 
 type Store struct {
 	db *sql.DB
+	// encKey is the AES-256-GCM key encrypting APIKey at rest (32 bytes —
+	// see DeriveEncryptionKey). A copy of the SQLite file alone must not
+	// disclose the LLM provider's API key.
+	encKey []byte
+}
+
+// DeriveEncryptionKey derives the AES-256-GCM key that encrypts the stored
+// LLM API key from the server's JWT signing secret, via SHA-256 with domain
+// separation — reusing the JWT secret's raw bytes directly would mix two
+// unrelated cryptographic purposes (signing vs. encryption) under one key.
+func DeriveEncryptionKey(jwtSecret []byte) []byte {
+	h := sha256.New()
+	h.Write([]byte("signmind-llm-apikey-v1"))
+	h.Write(jwtSecret)
+	return h.Sum(nil)
 }
 
 // Open creates parent directories, opens/creates the database, and applies
 // the schema. Mirrors predlog.Open (WAL + busy_timeout).
-func Open(path string) (*Store, error) {
+func Open(path string, encKey []byte) (*Store, error) {
 	if dir := filepath.Dir(path); dir != "." && dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("creating llm store dir: %w", err)
@@ -146,19 +170,78 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrating llm store: %w", err)
 	}
-	return &Store{db: db}, nil
+	return &Store{db: db, encKey: encKey}, nil
 }
 
 // OpenWith applies the llm schema to an existing *sql.DB. The caller owns the
 // DB lifetime.
-func OpenWith(db *sql.DB) (*Store, error) {
+func OpenWith(db *sql.DB, encKey []byte) (*Store, error) {
 	if _, err := db.Exec(schema); err != nil {
 		return nil, fmt.Errorf("migrating llm store: %w", err)
 	}
-	return &Store{db: db}, nil
+	return &Store{db: db, encKey: encKey}, nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
+
+// encryptAPIKey returns the base64-encoded AES-256-GCM sealing of plaintext,
+// or "" for an empty key (stored as empty, never encrypted — that would just
+// add ceremony around "no key set").
+func (s *Store) encryptAPIKey(plaintext string) (string, error) {
+	if plaintext == "" {
+		return "", nil
+	}
+	block, err := aes.NewCipher(s.encKey)
+	if err != nil {
+		return "", fmt.Errorf("api key cipher: %w", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("api key gcm: %w", err)
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return "", fmt.Errorf("api key nonce: %w", err)
+	}
+	sealed := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
+	return base64.StdEncoding.EncodeToString(sealed), nil
+}
+
+// decryptAPIKey reverses encryptAPIKey. A stored value that fails to decrypt
+// (wrong key, corruption, or a legacy plaintext value from before this
+// encryption was added) is treated as unusable rather than returned
+// verbatim — logged server-side, never surfaced as the literal API key.
+func (s *Store) decryptAPIKey(stored string) string {
+	if stored == "" {
+		return ""
+	}
+	raw, err := base64.StdEncoding.DecodeString(stored)
+	if err != nil {
+		log.Printf("llm: stored api_key is not valid base64 (pre-encryption legacy value?); treating as unset")
+		return ""
+	}
+	block, err := aes.NewCipher(s.encKey)
+	if err != nil {
+		log.Printf("llm: api key cipher: %v", err)
+		return ""
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		log.Printf("llm: api key gcm: %v", err)
+		return ""
+	}
+	if len(raw) < gcm.NonceSize() {
+		log.Printf("llm: stored api_key ciphertext too short; treating as unset")
+		return ""
+	}
+	nonce, ciphertext := raw[:gcm.NonceSize()], raw[gcm.NonceSize():]
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		log.Printf("llm: api key decrypt failed (JWT secret rotated?); treating as unset")
+		return ""
+	}
+	return string(plaintext)
+}
 
 // ---- settings ----
 
@@ -211,7 +294,7 @@ func (s *Store) GetSettings() (Settings, error) {
 		case keyEndpoint:
 			out.Endpoint = value
 		case keyAPIKey:
-			out.APIKey = value
+			out.APIKey = s.decryptAPIKey(value)
 		case keyModel:
 			out.Model = value
 		case keySystemPrompt:
@@ -287,7 +370,11 @@ func (s *Store) SaveSettings(p SettingsPatch) (Settings, error) {
 		writes[keyEndpoint] = *p.Endpoint
 	}
 	if p.APIKey != nil {
-		writes[keyAPIKey] = *p.APIKey
+		enc, err := s.encryptAPIKey(*p.APIKey)
+		if err != nil {
+			return Settings{}, fmt.Errorf("encrypting api key: %w", err)
+		}
+		writes[keyAPIKey] = enc
 	}
 	if p.Model != nil {
 		writes[keyModel] = *p.Model

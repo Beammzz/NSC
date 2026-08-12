@@ -1,5 +1,7 @@
 """Engine tests using a fake TFLite interpreter (no runtime needed)."""
 
+import json
+
 import numpy as np
 import pytest
 from fakes import NUM_CLASSES, FakeInterpreter, moving_frames, write_artifacts
@@ -61,6 +63,44 @@ class TestModelLifecycle:
             engine.load_model(str(artifacts / eng.MODEL_FILENAME), str(bad_map))
         assert engine.model_loaded
         assert engine.model_info()[0] == NUM_CLASSES
+
+    def test_activate_artifacts_rolls_back_on_bad_confidence_threshold(
+        self, artifacts, tmp_path
+    ):
+        # A non-numeric confidence_threshold used to be cast to float() AFTER
+        # the model/config were already swapped (engine.py activate_artifacts),
+        # leaving a broken model live. Validation now runs before the swap.
+        engine, _ = make_engine(artifacts, [0.1, 0.2, 0.6, 0.1])
+        staging = tmp_path / "staged"
+        staging.mkdir()
+        write_artifacts(staging)
+        (staging / tp.CONFIG_FILENAME).write_text(
+            json.dumps({"confidence_threshold": "not-a-number"}), encoding="utf-8"
+        )
+        with pytest.raises(eng.ModelLoadError, match="confidence_threshold"):
+            engine.activate_artifacts(str(staging))
+        assert engine.model_loaded
+        assert engine.config["confidence_threshold"] == pytest.approx(0.6)
+        assert engine.tuning.confidence_threshold == pytest.approx(0.6)
+
+    def test_activate_artifacts_rolls_back_on_zero_target_fps(
+        self, artifacts, tmp_path
+    ):
+        # target_fps=0 used to pass validation entirely and only crash later,
+        # per-frame, with 1000.0 / target_fps (ZeroDivisionError) in
+        # InferenceSession.add_frame — a persistent DoS once the manifest
+        # was written. Must now be rejected at activation time instead.
+        engine, _ = make_engine(artifacts, [0.1, 0.2, 0.6, 0.1])
+        staging = tmp_path / "staged2"
+        staging.mkdir()
+        write_artifacts(staging)
+        (staging / tp.CONFIG_FILENAME).write_text(
+            json.dumps({"target_fps": 0}), encoding="utf-8"
+        )
+        with pytest.raises(eng.ModelLoadError, match="target_fps"):
+            engine.activate_artifacts(str(staging))
+        assert engine.model_loaded
+        assert engine.config["target_fps"] == 12
 
 
 class TestPrediction:

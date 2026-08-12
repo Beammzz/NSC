@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:signmind/core/services/tts_service.dart';
 import 'package:signmind/core/widgets/main_scaffold.dart';
+import 'package:signmind/features/auth/presentation/providers/auth_provider.dart';
 import 'package:signmind/features/scanner/data/services/feature_vector_builder.dart';
 import 'package:signmind/features/scanner/data/services/landmark_extraction_service.dart';
 import 'package:signmind/features/scanner/data/services/tsl_stream_service.dart';
@@ -23,6 +24,14 @@ class ScannerNotifier extends Notifier<ScannerState> {
     final streamService = ref.watch(tslStreamServiceProvider);
     final ttsService = ref.watch(ttsServiceProvider);
     final isActive = ref.watch(isScannerActiveProvider);
+    final isAuthenticated =
+        ref.watch(authProvider.select((s) => s.isAuthenticated));
+
+    if (!isAuthenticated) {
+      // Logged out (or never logged in) — a previous user's recognized
+      // words/sentence must not carry over to whoever uses this device next.
+      _savedState = null;
+    }
 
     final initialState = _savedState ?? ScannerState.initial();
     _savedState = initialState;

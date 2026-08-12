@@ -17,6 +17,12 @@ type Config struct {
 	HTTPAddr string
 	// AIAddr is the Python gRPC inference service address.
 	AIAddr string
+	// AISharedSecret authenticates this backend to the Python gRPC service
+	// (sent as per-RPC metadata; see Inference_backend/inference/
+	// auth_interceptor.py). Required in Prod; an empty value in Dev leaves
+	// the internal gRPC link unauthenticated (matches the Python service's
+	// own dev fallback) — set it outside local dev.
+	AISharedSecret string
 	// Env is EnvDev or EnvProd. Dev enables all debug: verbose gateway
 	// logging and debug_mode on the Python inference service (full
 	// probability breakdowns per prediction).
@@ -72,15 +78,16 @@ func load(fileVars map[string]string) Config {
 		env = EnvDev
 	}
 	return Config{
-		HTTPAddr:      get("SIGNMIND_HTTP_ADDR", ":8080"),
-		AIAddr:        get("SIGNMIND_AI_ADDR", "localhost:50051"),
-		Env:           env,
-		DBPath:        get("SIGNMIND_DB_PATH", "data/predictions.db"),
-		JWTSecret:     get("SIGNMIND_JWT_SECRET", ""),
-		AdminEmail:    get("SIGNMIND_ADMIN_EMAIL", ""),
-		AdminPassword: get("SIGNMIND_ADMIN_PASSWORD", ""),
-		AllowSignup:   strings.EqualFold(get("SIGNMIND_ALLOW_SIGNUP", "true"), "true"),
-		TrustProxy:    strings.EqualFold(get("SIGNMIND_TRUST_PROXY", "false"), "true"),
+		HTTPAddr:       get("SIGNMIND_HTTP_ADDR", ":8080"),
+		AIAddr:         get("SIGNMIND_AI_ADDR", "localhost:50051"),
+		AISharedSecret: get("SIGNMIND_AI_SHARED_SECRET", ""),
+		Env:            env,
+		DBPath:         get("SIGNMIND_DB_PATH", "data/predictions.db"),
+		JWTSecret:      get("SIGNMIND_JWT_SECRET", ""),
+		AdminEmail:     get("SIGNMIND_ADMIN_EMAIL", ""),
+		AdminPassword:  get("SIGNMIND_ADMIN_PASSWORD", ""),
+		AllowSignup:    strings.EqualFold(get("SIGNMIND_ALLOW_SIGNUP", "true"), "true"),
+		TrustProxy:     strings.EqualFold(get("SIGNMIND_TRUST_PROXY", "false"), "true"),
 
 		KeypointPython: get("SIGNMIND_KEYPOINT_PY", ""),
 		ExtractScript:  get("SIGNMIND_EXTRACT_SCRIPT", ""),
