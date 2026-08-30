@@ -10,8 +10,8 @@ KEY CONSTRAINT FOUND FIRST: `Backend/internal/webui/webui.go:13` does `//go:embe
 the Dockerfile therefore build `Backend/webui` (npm ci + npm run build) BEFORE any Go step.
 Do not "simplify" that step away.
 DELIVERED:
-- `.github/workflows/ci.yml` — tests on PR + push to main (backend vet/gofmt/test -race/build,
-  inference ruff/pytest, frontend format/analyze/test); publish jobs gated on `needs:` + push to
+- `.github/workflows/ci.yml` — tests on PR + push to main (backend vet/test -race/build,
+  inference ruff/pytest, frontend analyze/test); publish jobs gated on `needs:` + push to
   main. Android: debug APK on PR, release APK (split-per-abi) + AAB on merge. Docker: matrix over
   backend/inference -> GHCR, with a boot smoke test on the backend image.
 - `Backend/Dockerfile` (3 stages: node webui -> go build -> alpine runtime, 39.1 MB, non-root
@@ -22,6 +22,13 @@ DELIVERED:
   HTTP-01; inference sits on an `internal: true` network and is never published.
 - `Frontend/android/app/build.gradle.kts` — optional release signing from key.properties or
   ANDROID_* env vars, falling back to the debug key exactly as before when absent.
+NO FORMAT GATES ON PURPOSE: `gofmt -l Backend` lists 5 of 37 files already unformatted on main
+(cmd/server/main.go, internal/admin/handler.go, internal/admin/handler_test.go, internal/auth/jwt.go,
+internal/predlog/store_test.go), so a gofmt step would land CI red on the first merge; reformatting
+them was out of scope for this task. `dart format --set-exit-if-changed` was dropped for the same
+reason plus being unverifiable here (no Flutter in the container). To adopt: `cd Backend && gofmt -w .`
+then re-add the step. `go test -race` IS enabled — unlike the format gates it was measured green
+first (race_exit=0, ~111s).
 VERIFIED 2026-08-30 (local, Docker 29.3.1): both images build; backend boots in Prod, `/healthz`
 200, embedded webui serves real HTML (proves the cross-stage go:embed chain), HEALTHCHECK healthy,
 SQLite WAL writes as uid 10001; inference loads the model (150 classes) and serves gRPC on

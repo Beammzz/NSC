@@ -57,13 +57,15 @@ jobs:
         working-directory: Backend
         run: go vet ./...
 
-      # Matches the project's own verify command (CLAUDE.md): `go vet ./... &&
-      # go test ./...`. -race is deliberately not added here — it has never been
-      # run against this tree, and a CI gate stricter than the documented one
-      # would land red without warning.
+      # Superset of the project's documented verify command (CLAUDE.md:
+      # `go vet ./... && go test ./...`). -race is included because it was
+      # measured clean on this tree before being added here — 8/8 packages ok,
+      # ~111s, of which internal/auth is 98s (bcrypt, amplified by the
+      # detector). Worth it for a server whose whole job is concurrent
+      # WebSocket and gRPC streaming. Drop the flag if that cost stops paying.
       - name: go test
         working-directory: Backend
-        run: go test ./...
+        run: go test -race ./...
 
       - name: go build
         working-directory: Backend
