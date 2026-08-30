@@ -1,0 +1,26 @@
+# Build context hygiene for the inference image.
+
+# Local envs and caches — never the ones the image installs.
+.venv
+venv
+__pycache__
+**/__pycache__
+*.py[cod]
+.pytest_cache
+.ruff_cache
+uv.lock
+
+# Tests and dev-only tooling stay out of the runtime image.
+tests/
+pyrightconfig.json
+
+# Keypoint extraction is invoked by the Go backend as a subprocess on the host
+# (SIGNMIND_KEYPOINT_PY / SIGNMIND_EXTRACT_SCRIPT); it is not part of the
+# gRPC service and pulls in MediaPipe, which this image does not install.
+extract_keypoints.py
+
+*.log
+.git
+AGENTS.md
+Dockerfile
+.dockerignore

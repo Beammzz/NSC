@@ -1,5 +1,40 @@
 # State
 
+## Goal (2026-08-30): CI/CD for Android + server, Docker images, Traefik HTTPS compose
+User: "I want you to build a CI/CD for both Android and Server on merge also run test and for
+the server build make it docker and also make an example-compose.yaml for docker compose with
+https for traefik."
+KEY CONSTRAINT FOUND FIRST: `Backend/internal/webui/webui.go:13` does `//go:embed all:dist`, and
+`internal/webui/dist` is gitignored — so on a fresh clone EVERY Go command (`go vet`, `go test`,
+`go build`) fails with `pattern all:dist: no matching files found`. Both the CI backend job and
+the Dockerfile therefore build `Backend/webui` (npm ci + npm run build) BEFORE any Go step.
+Do not "simplify" that step away.
+DELIVERED:
+- `.github/workflows/ci.yml` — tests on PR + push to main (backend vet/gofmt/test -race/build,
+  inference ruff/pytest, frontend format/analyze/test); publish jobs gated on `needs:` + push to
+  main. Android: debug APK on PR, release APK (split-per-abi) + AAB on merge. Docker: matrix over
+  backend/inference -> GHCR, with a boot smoke test on the backend image.
+- `Backend/Dockerfile` (3 stages: node webui -> go build -> alpine runtime, 39.1 MB, non-root
+  uid 10001, network-free final stage) + `.dockerignore`.
+- `Inference_backend/Dockerfile` (python:3.12-slim + ai-edge-litert 2.2.0, 418 MB, non-root)
+  + `.dockerignore`. Runtime deps are read out of pyproject.toml with tomllib so they cannot drift.
+- `example-compose.yaml` + `.env.example` — traefik v3.7, HTTP->HTTPS redirect, Let's Encrypt
+  HTTP-01; inference sits on an `internal: true` network and is never published.
+- `Frontend/android/app/build.gradle.kts` — optional release signing from key.properties or
+  ANDROID_* env vars, falling back to the debug key exactly as before when absent.
+VERIFIED 2026-08-30 (local, Docker 29.3.1): both images build; backend boots in Prod, `/healthz`
+200, embedded webui serves real HTML (proves the cross-stage go:embed chain), HEALTHCHECK healthy,
+SQLite WAL writes as uid 10001; inference loads the model (150 classes) and serves gRPC on
+0.0.0.0:50051; `docker compose up backend inference` -> both healthy, `depends_on: service_healthy`
+gates correctly, ZERO gRPC errors (shared-secret link works), `signmind_internal` has internal=true.
+`actionlint` clean; `docker compose config` valid and the `:?` guards reject an empty env.
+NOT VERIFIED LOCALLY: Flutter is not installed in this container, so `flutter analyze/test` and the
+Gradle signing change have never been executed — CI is their first run.
+NOTED (not done): `Inference_backend/TSL_Output/active_model.json` holds a Windows path
+(`uploads\20260725T022950901648Z`); on Linux `_resolve_artifact_dir` cannot find it and falls back
+to the TSL_Output root, which logs a WARNING on every boot. The fallback model is correct, so this
+is cosmetic today, but a Linux deploy can never activate an uploaded model until it is fixed.
+
 ## Goal (2026-07-24): S25 FE 5fps — analysis stream bound at 2992x2992
 User: "Why is my performance is terrible? even in the flagship (S25 FE)? like I currently get
 5 fps with no hand."
@@ -565,8 +600,12 @@ Inference_backend/inference/auth_interceptor.py. All uncommitted per the Constra
 has not asked to commit in this task's conversation).
 
 ## Constraints
-- Do not git push (user has never asked for a push).
-- Do not commit until the user asks; whole tree deliberately uncommitted.
+- 2026-08-30 user (CI/CD task): asked, when offered the choice, to "Commit and push to that
+  branch" — supersedes the two blanket rules below FOR THE CI/CD BRANCH
+  `claude/cicd-android-server-docker-xrd1tr` ONLY. Everywhere else the rules below still hold:
+  ask before committing, and never push without the user saying so in that conversation.
+- Do not git push (unless the user asks for a push in that conversation).
+- Do not commit until the user asks; whole tree otherwise deliberately uncommitted.
 - Shorebird OTA (`shorebird patch`) only when the user says they are satisfied.
 - Never delete files without pasting what will be lost and getting approval in-conversation.
 - 2026-07-19 user: "Delete lite model and also do Anything that will fix the low fps
