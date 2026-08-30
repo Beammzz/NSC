@@ -1,6 +1,7 @@
 """Engine tests using a fake TFLite interpreter (no runtime needed)."""
 
 import json
+import os
 
 import numpy as np
 import pytest
@@ -101,6 +102,62 @@ class TestModelLifecycle:
             engine.activate_artifacts(str(staging))
         assert engine.model_loaded
         assert engine.config["target_fps"] == 12
+
+    def test_manifest_with_windows_separator_resolves(self, tmp_path):
+        # UploadModel on a Windows host writes "uploads\<ts>", because
+        # os.path.relpath emits os.sep. Backslash is a legal filename character
+        # on POSIX, so a naive os.path.join treats the whole string as ONE
+        # directory name, finds nothing, and drops back to the legacy root
+        # layout — the same manifest then serves DIFFERENT models on Windows
+        # and Linux, while the admin UI reports the upload as active on both.
+        staged = tmp_path / "uploads" / "20260725T022950901648Z"
+        staged.mkdir(parents=True)
+        write_artifacts(staged)
+        (tmp_path / eng.ACTIVE_MANIFEST).write_text(
+            json.dumps({"dir": "uploads\\20260725T022950901648Z"}), encoding="utf-8"
+        )
+        engine = eng.InferenceEngine(
+            output_dir=str(tmp_path),
+            interpreter_factory=lambda path: FakeInterpreter([0.1, 0.2, 0.6, 0.1]),
+        )
+        assert os.path.normpath(engine.artifact_dir) == os.path.normpath(str(staged))
+        assert engine.model_loaded
+
+    def test_manifest_pointing_at_missing_dir_still_falls_back(self, artifacts, caplog):
+        # The separator handling must not swallow the genuine "stale pointer"
+        # case: a manifest naming a directory that does not exist still has to
+        # warn and fall back to the legacy root layout.
+        (artifacts / eng.ACTIVE_MANIFEST).write_text(
+            json.dumps({"dir": "uploads/does-not-exist"}), encoding="utf-8"
+        )
+        with caplog.at_level("WARNING"):
+            engine, _ = make_engine(artifacts, [0.1, 0.2, 0.6, 0.1])
+        assert os.path.normpath(engine.artifact_dir) == os.path.normpath(str(artifacts))
+        assert "no model is there" in caplog.text
+
+    def test_activate_artifacts_writes_posix_relative_manifest(
+        self, artifacts, monkeypatch
+    ):
+        # Whatever the host separator, what lands on disk must be POSIX-style,
+        # so a manifest written on Windows stays readable on a Linux deploy.
+        # os.sep and os.path.relpath are faked to a Windows host, because on a
+        # POSIX runner the un-normalised code produces the right answer by
+        # accident and this test could never fail.
+        engine, _ = make_engine(artifacts, [0.1, 0.2, 0.6, 0.1])
+        staged = artifacts / "uploads" / "20260801T000000000000Z"
+        staged.mkdir(parents=True)
+        write_artifacts(staged)
+        monkeypatch.setattr(eng.os, "sep", "\\")
+        monkeypatch.setattr(
+            eng.os.path,
+            "relpath",
+            lambda *a, **kw: "uploads\\20260801T000000000000Z",
+        )
+        engine.activate_artifacts(str(staged))
+        written = json.loads(
+            (artifacts / eng.ACTIVE_MANIFEST).read_text(encoding="utf-8")
+        )
+        assert written["dir"] == "uploads/20260801T000000000000Z"
 
 
 class TestPrediction:

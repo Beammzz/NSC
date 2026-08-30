@@ -189,8 +189,22 @@ class InferenceEngine:
         try:
             with open(manifest_path, encoding="utf-8") as f:
                 rel = json.load(f)["dir"]
-            candidate = os.path.join(self.output_dir, rel)
-        except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+            # The manifest is written by whichever host ran UploadModel, and on
+            # Windows os.path.relpath emits "uploads\<ts>". Backslash is a legal
+            # filename character on POSIX, so os.path.join would treat the whole
+            # string as ONE directory name, find nothing, and fall through to
+            # the legacy root layout below — meaning a model activated from a
+            # Windows box could never load on a Linux deployment, while the
+            # admin UI still reported it as active. Accept either separator on
+            # read; os.path.join takes "/" on Windows too.
+            candidate = os.path.join(self.output_dir, rel.replace("\\", "/"))
+        except (
+            OSError,
+            json.JSONDecodeError,
+            KeyError,
+            TypeError,
+            AttributeError,  # "dir" present but not a string
+        ) as exc:
             logger.warning(
                 "Ignoring unreadable %s (%s); using %s",
                 ACTIVE_MANIFEST,
@@ -265,7 +279,12 @@ class InferenceEngine:
             )
         self.artifact_dir = artifact_dir
         manifest_path = os.path.join(self.output_dir, ACTIVE_MANIFEST)
-        rel = os.path.relpath(artifact_dir, self.output_dir)
+        # Store POSIX-style whatever the host is: os.path.relpath emits os.sep,
+        # so a Windows box would otherwise persist "uploads\<ts>" into a file
+        # that a Linux deployment has to read. Replacing os.sep rather than a
+        # literal backslash leaves a POSIX directory whose own name contains a
+        # backslash intact.
+        rel = os.path.relpath(artifact_dir, self.output_dir).replace(os.sep, "/")
         with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump({"dir": rel}, f)
         logger.info("Activated uploaded artifacts: %s", rel)

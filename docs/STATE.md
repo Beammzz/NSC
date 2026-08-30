@@ -1,5 +1,35 @@
 # State
 
+## Goal (2026-08-30): active_model.json separator — Windows and Linux served different models
+Task (spawned from the CI/CD work): make the active-model pointer round-trip across OSes.
+ROOT CAUSE, both ends of one round trip in `Inference_backend/inference/engine.py`:
+  WRITER `activate_artifacts` used `os.path.relpath(artifact_dir, output_dir)`, which emits
+  `os.sep` — so a Windows UploadModel persisted `uploads\<utc-ts>` into the manifest.
+  READER `_resolve_artifact_dir` did `os.path.join(output_dir, rel)`; backslash is a legal POSIX
+  filename character, so Linux treated the whole string as ONE directory name, found nothing, and
+  fell through to the legacy root layout.
+IMPACT (worse than the original note claimed): the manifest selects
+`uploads/20260725T022950901648Z` = the 13-class reduced scan vocabulary the user asked for on
+2026-07-25 ("I need to reduce amount of sign available for scan"). Windows honoured it; every
+Linux/container deploy silently served the 150-class root model instead, while the admin UI
+reported the upload as active on both. That reduction had never actually shipped on Linux.
+FIX: writer normalises `os.sep` -> "/" (deliberately not a literal backslash, so a POSIX directory
+whose own name contains a backslash is left intact); reader accepts either separator. AttributeError
+added to the reader's except tuple — without it a non-string "dir" would newly crash instead of
+falling back. Committed manifest repointed to a forward slash. Inference_backend/AGENTS.md now
+records the POSIX-relative invariant so this cannot regress silently.
+CONSTRAINT NOTE: the 2026-07-25 "Do NOT edit label_map.json / the model" constraint was checked and
+does not bite — no label map and no .tflite was touched; only the pointer's separator changed, and
+the vocabulary it selects is unchanged. The edit implements that constraint's intent on Linux.
+VERIFIED 2026-08-30: `uv run ruff check` -> "All checks passed!"; `uv run pytest -q` -> "82 passed
+in 0.63s" (79 before, +3). Each new test was confirmed to FAIL with its own fix reverted; the reader
+test reproduces the exact production warning. The writer test fakes os.sep/os.path.relpath to a
+Windows host, because on a POSIX runner the un-normalised code is right by accident and the test
+could otherwise never fail. End-to-end: rebuilt inference image logs "Model loaded:
+tsl_lstm_f32.tflite (13 classes, window 30, features 441, idle_idx 12)" with no warning (was
+"150 classes ... idle_idx None" plus the fallback warning) — idle_idx is populated for the first
+time on Linux, so idle bypass works there now.
+
 ## Goal (2026-08-30): CI/CD for Android + server, Docker images, Traefik HTTPS compose
 User: "I want you to build a CI/CD for both Android and Server on merge also run test and for
 the server build make it docker and also make an example-compose.yaml for docker compose with
@@ -37,10 +67,10 @@ gates correctly, ZERO gRPC errors (shared-secret link works), `signmind_internal
 `actionlint` clean; `docker compose config` valid and the `:?` guards reject an empty env.
 NOT VERIFIED LOCALLY: Flutter is not installed in this container, so `flutter analyze/test` and the
 Gradle signing change have never been executed — CI is their first run.
-NOTED (not done): `Inference_backend/TSL_Output/active_model.json` holds a Windows path
-(`uploads\20260725T022950901648Z`); on Linux `_resolve_artifact_dir` cannot find it and falls back
-to the TSL_Output root, which logs a WARNING on every boot. The fallback model is correct, so this
-is cosmetic today, but a Linux deploy can never activate an uploaded model until it is fixed.
+RESOLVED 2026-08-30 (follow-up task, same session): the active_model.json Windows-path bug was
+fixed — see the next Goal block. My original note called it cosmetic on the grounds that "the
+fallback model is correct". That was WRONG: the fallback served 150 classes while the manifest
+selects the 13-class reduced scan vocabulary, so Windows and Linux ran different models.
 
 ## Goal (2026-07-24): S25 FE 5fps — analysis stream bound at 2992x2992
 User: "Why is my performance is terrible? even in the flagship (S25 FE)? like I currently get
