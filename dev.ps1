@@ -79,12 +79,11 @@ $env:SIGNMIND_AI_ADDR   = $aiAddr
 $secretBytes = New-Object byte[] 32
 [System.Security.Cryptography.RNGCryptoServiceProvider]::new().GetBytes($secretBytes)
 $env:SIGNMIND_AI_SHARED_SECRET = -join ($secretBytes | ForEach-Object { $_.ToString('x2') })
-# Sign-recording keypoint extractor (admin webui): the same x64 venv Python
-# (with MediaPipe) runs Inference_backend/extract_keypoints.py to turn an
-# uploaded clip into avatar frames. Unset -> recording uploads return 503
-# "keypoint extraction is not configured on this server".
-$env:SIGNMIND_KEYPOINT_PY    = $python
-$env:SIGNMIND_EXTRACT_SCRIPT = Join-Path $aiDir 'extract_keypoints.py'
+# Sign-recording keypoint extraction (admin webui) needs no env vars: the
+# gateway asks the Python service over gRPC (ExtractKeypoints), which runs
+# MediaPipe in-process. That venv therefore needs the `extract` extra —
+# `<x64 python> -m pip install -e Inference_backend[extract]` — otherwise the
+# RPC answers FAILED_PRECONDITION and the recording upload surfaces it as 422.
 
 $procs = @()
 
@@ -130,7 +129,5 @@ finally {
     Remove-Item Env:\SIGNMIND_HTTP_ADDR        -ErrorAction SilentlyContinue
     Remove-Item Env:\SIGNMIND_AI_ADDR          -ErrorAction SilentlyContinue
     Remove-Item Env:\SIGNMIND_AI_SHARED_SECRET -ErrorAction SilentlyContinue
-    Remove-Item Env:\SIGNMIND_KEYPOINT_PY      -ErrorAction SilentlyContinue
-    Remove-Item Env:\SIGNMIND_EXTRACT_SCRIPT   -ErrorAction SilentlyContinue
     Write-Step "stopped."
 }

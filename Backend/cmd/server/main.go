@@ -133,10 +133,10 @@ func main() {
 	if err := learn.Seed(learnStore); err != nil {
 		log.Fatalf("seeding learn content: %v", err)
 	}
-	// Sign-recording keypoint extractor (admin webui). Unconfigured when the
-	// SIGNMIND_KEYPOINT_PY / SIGNMIND_EXTRACT_SCRIPT paths are unset — recording
-	// uploads then return 503, the rest of the learn API is unaffected.
-	extractor := keypoint.New(cfg.KeypointPython, cfg.ExtractScript, 0)
+	// Sign-recording keypoint extractor (admin webui): MediaPipe runs in the
+	// Python AI service over the same gRPC connection as inference, so this
+	// needs no interpreter, script path, or extra configuration here.
+	extractor := keypoint.New(aiClient.Raw(), 0)
 	learn.NewHandler(learnStore, extractor).RegisterProtected(mux, requireAuth, adminMW)
 
 	// Static webui served at / (API routes win by mux specificity).

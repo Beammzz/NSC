@@ -12,6 +12,20 @@ dependencies = [
     #   ai-edge-litert  (preferred)  or  tensorflow
 ]
 
+[project.optional-dependencies]
+# Serves the ExtractKeypoints RPC (MediaPipe pose + hand landmarkers over a
+# recorded clip). An extra, not a runtime dependency: it is ~400 MB installed
+# and a service that only answers StreamInference has no use for it — without
+# it that one RPC reports FAILED_PRECONDITION and everything else still runs.
+# The Docker image installs it (see Dockerfile).
+#   >=0.10.35: every earlier release pins protobuf<5, which contradicts the
+#   protobuf>=5.27 the generated stubs need.
+# cv2 deliberately goes unlisted — mediapipe depends on opencv-contrib-python,
+# and adding opencv-python alongside it puts two cv2 providers in one env.
+extract = [
+    "mediapipe>=0.10.35",
+]
+
 [dependency-groups]
 dev = [
     "grpcio-tools>=1.81",

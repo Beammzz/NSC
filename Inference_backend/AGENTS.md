@@ -6,7 +6,7 @@ Child of root `Agents.md` (DOX). Root global contracts apply in full; this doc a
 
 ## Purpose
 
-Python gRPC TSL inference service: receives landmark-frame streams from the Golang gateway, runs the LSTM (TFLite) over a 30-frame sliding window, and streams predictions back. Also serves management RPCs for the gateway/webui: model upload with hot-swap, live log streaming, and runtime tuning.
+Python gRPC TSL inference service: receives landmark-frame streams from the Golang gateway, runs the LSTM (TFLite) over a 30-frame sliding window, and streams predictions back. Also serves management RPCs for the gateway/webui: model upload with hot-swap, live log streaming, runtime tuning, and offline keypoint extraction from recorded sign clips.
 
 ---
 
@@ -16,8 +16,9 @@ Python gRPC TSL inference service: receives landmark-frame streams from the Gola
 |---|---|
 | `tsl_preprocess.py` | Training-matching preprocessing: config load, hand normalization, temporal resampling (`resample_window` / `target_fps: 12`), delta features. ⚠️ RECONSTRUCTION — see Local Contracts |
 | `tsl_live_inference.py` | Webcam demo (MediaPipe + TFLite); reference implementation the server mirrors |
+| `extract_keypoints.py` | Recorded clip -> `SignAvatar` keypoint frames (MediaPipe pose + hand landmarkers). Imported by `server.py`'s `ExtractKeypoints` RPC; also runnable as a CLI |
 | `inference/engine.py` | Model lifecycle (load/validate/hot-swap), per-stream timestamped sliding-window sessions (`resample_window`), idle bypass, uncertainty gate, runtime tuning |
-| `inference/server.py` | `TslInference` gRPC servicer (`StreamInference`, `UploadModel`, `StreamLogs`, `GetTuning`/`SetTuning`) + entrypoint |
+| `inference/server.py` | `TslInference` gRPC servicer (`StreamInference`, `UploadModel`, `ExtractKeypoints`, `StreamLogs`, `GetTuning`/`SetTuning`) + entrypoint |
 | `inference/logstream.py` | Logging handler: ring buffer + live subscriber queues feeding `StreamLogs` |
 | `inference/pb/` | Generated stubs from `docs/api/tsl_inference.proto` — never edit by hand; regenerate (see Work Guidance) |
 | `TSL_Output/` | Model artifacts: `tsl_lstm_f32.tflite`, `label_map.json`, `preprocess_config.json`; `uploads/<utc-ts>/` dirs + `active_model.json` manifest written by `UploadModel` |
@@ -35,6 +36,9 @@ Python gRPC TSL inference service: receives landmark-frame streams from the Gola
 - `UploadModel` never overwrites live artifact files (Windows refuses replacing a memory-mapped model): each upload lands in `TSL_Output/uploads/<utc-ts>/` and `TSL_Output/active_model.json` points at the active set. Legacy layout (files directly in `TSL_Output/`) is the fallback when no manifest exists.
   - The manifest's `dir` is stored **POSIX-relative** to `TSL_Output/` on every host (`activate_artifacts` replaces `os.sep`), and the reader accepts either separator. Without that, `os.path.relpath` on a Windows dev box writes `uploads\<utc-ts>`, which a Linux deploy cannot resolve — it silently falls back to the legacy layout, so the two platforms serve **different models** from the same manifest while the admin UI reports the upload as active on both.
 - Uploads are validated (interpreter loads, label map parses and matches class count, feature dim matches preprocess config) before the swap; on failure the previous model stays live.
+- `ExtractKeypoints` is the ONLY keypoint-extraction path: the Go gateway image is a static binary with no Python, so it streams the clip here rather than exec'ing `extract_keypoints.py` (which it did until the extraction move — the old `SIGNMIND_KEYPOINT_PY`/`SIGNMIND_EXTRACT_SCRIPT` env vars are gone). It is offline and touches neither the interpreter nor any `InferenceSession`, so it cannot disturb a live stream — but it is CPU-heavy and shares the servicer thread pool, so a burst of admin recordings competes with inference for cores.
+- MediaPipe lives in the `extract` extra (`pip install -e .[extract]`), not in `[project.dependencies]`: it is ~400 MB and only deployments serving `ExtractKeypoints` need it. Without it the service still starts and the RPC answers `FAILED_PRECONDITION` — never a crash at import. Every mediapipe up to 0.10.21 pins `protobuf<5` and so contradicts the stubs' `protobuf>=5.27`; the floor is `>=0.10.35`.
+- The clip extension arriving in `ExtractInfo` names a temp file — it is checked against `ALLOWED_CLIP_EXTENSIONS` before use, never interpolated into a path as sent.
 - Tuning values (`SetTuning`) are runtime-only; they reset to `preprocess_config.json` values on restart. `debug_mode` (optional bool in tuning/prediction) expands `top` breakdown to 10 entries and populates `other_prob`.
 - Model input/output shape: `(1, sequence_len, feature_dim)` → `(1, num_classes)`; window length comes from the interpreter, not hard-coded.
 
@@ -43,7 +47,8 @@ Python gRPC TSL inference service: receives landmark-frame streams from the Gola
 ## Work Guidance
 
 - Run the service: `python -m inference.server` from `Inference_backend/` (listens on `SIGNMIND_AI_ADDR`, default `localhost:50051` — the gateway's default dial target).
-- Windows runtime: the TFLite runtime (`ai-edge-litert` or `tensorflow`) ships no win_arm64 wheels — run the service under the **x64** venv at `Inference_backend/.venv-x64` (what `dev.ps1` prefers; recreate with `<x64 python> -m venv .venv-x64` then `pip install grpcio numpy protobuf ai-edge-litert`). Tests and `ruff` run fine on arm64 (the fake interpreter avoids the runtime).
+- Windows runtime: the TFLite runtime (`ai-edge-litert` or `tensorflow`) ships no win_arm64 wheels — run the service under the **x64** venv at `Inference_backend/.venv-x64` (what `dev.ps1` prefers; recreate with `<x64 python> -m venv .venv-x64` then `pip install grpcio numpy protobuf ai-edge-litert mediapipe`). Tests and `ruff` run fine on arm64 (the fake interpreter avoids the runtime, and the `ExtractKeypoints` tests fake the extractor rather than importing MediaPipe).
+- Sign recording in local dev needs `mediapipe` in that same x64 venv — it is what serves `ExtractKeypoints`. Without it the admin Dictionary page's recorder fails with a 422 whose detail names the missing module. On first extraction the landmarker `.task` models (~16 MB) download into the service's working directory; the Docker image bakes them in at build time instead, so the running container never reaches the network for them.
 - Regenerate stubs after any `docs/api/tsl_inference.proto` change (from repo root; needs `grpcio-tools` and, for Go, `protoc-gen-go` v1.36.11 + `protoc-gen-go-grpc` v1.6.2 in `~/go/bin`):
   ```
   python -m grpc_tools.protoc -I docs/api \

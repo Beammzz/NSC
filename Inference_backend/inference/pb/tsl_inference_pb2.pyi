@@ -101,6 +101,30 @@ class UploadModelResponse(_message.Message):
     feature_dim: int
     def __init__(self, reloaded: _Optional[bool] = ..., num_classes: _Optional[int] = ..., sequence_len: _Optional[int] = ..., feature_dim: _Optional[int] = ...) -> None: ...
 
+class ExtractInfo(_message.Message):
+    __slots__ = ("extension", "frames")
+    EXTENSION_FIELD_NUMBER: _ClassVar[int]
+    FRAMES_FIELD_NUMBER: _ClassVar[int]
+    extension: str
+    frames: int
+    def __init__(self, extension: _Optional[str] = ..., frames: _Optional[int] = ...) -> None: ...
+
+class ExtractKeypointsRequest(_message.Message):
+    __slots__ = ("info", "chunk")
+    INFO_FIELD_NUMBER: _ClassVar[int]
+    CHUNK_FIELD_NUMBER: _ClassVar[int]
+    info: ExtractInfo
+    chunk: bytes
+    def __init__(self, info: _Optional[_Union[ExtractInfo, _Mapping]] = ..., chunk: _Optional[bytes] = ...) -> None: ...
+
+class ExtractKeypointsResponse(_message.Message):
+    __slots__ = ("frames_json", "frame_count")
+    FRAMES_JSON_FIELD_NUMBER: _ClassVar[int]
+    FRAME_COUNT_FIELD_NUMBER: _ClassVar[int]
+    frames_json: str
+    frame_count: int
+    def __init__(self, frames_json: _Optional[str] = ..., frame_count: _Optional[int] = ...) -> None: ...
+
 class StreamLogsRequest(_message.Message):
     __slots__ = ("min_level", "history_lines")
     MIN_LEVEL_FIELD_NUMBER: _ClassVar[int]

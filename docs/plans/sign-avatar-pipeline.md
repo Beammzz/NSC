@@ -115,8 +115,10 @@ Split into ordered steps, each with its own check (total exceeds 150 lines):
     `POST /api/v1/admin/learn/signs/{word}/recording` (multipart video → extractor → SetKeypointFrames),
     `DELETE /api/v1/admin/learn/signs/{word}`.
   - Inject the `keypoint.Extractor` into the learn `Handler`.
-  - Config keys (in `Backend/internal/config`): `SIGNMIND_KEYPOINT_PY` (x64 python path),
-    `SIGNMIND_EXTRACT_SCRIPT` (path to `extract_keypoints.py`).
+  - ~~Config keys (in `Backend/internal/config`): `SIGNMIND_KEYPOINT_PY` (x64 python path),
+    `SIGNMIND_EXTRACT_SCRIPT` (path to `extract_keypoints.py`).~~ SUPERSEDED: extraction moved
+    into the AI service as the `ExtractKeypoints` RPC (the gateway container has no Python), so
+    both keys are gone and the extractor takes the existing gRPC client instead.
   - Check: `go vet ./... && go test ./...`.
 - DONE-WHEN: all sub-checks green; live: upload clip → `GET /api/v1/learn/dictionary/{word}` returns
   frames; dictionary avatar plays them.

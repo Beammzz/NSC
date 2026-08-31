@@ -4,6 +4,8 @@ RPCs (contract: docs/api/tsl_inference.proto):
   StreamInference — bidi landmark frames -> predictions (the landmark path;
                     gRPC only, no HTTP fallback, per root DOX)
   UploadModel     — client-streamed model/label-map upload, atomic hot-swap
+  ExtractKeypoints — client-streamed sign clip -> avatar keypoint frames JSON
+                    (MediaPipe, offline; the gateway image has no Python)
   StreamLogs      — server-streamed live log records for the Go gateway
   GetTuning /
   SetTuning       — runtime inference knobs for the webui
@@ -12,11 +14,13 @@ Run: python -m inference.server   (listens on SIGNMIND_AI_ADDR,
 default localhost:50051 — the Go gateway's default dial target).
 """
 
+import json
 import logging
 import os
 import queue
 import shutil
 import signal
+import tempfile
 import threading
 from concurrent import futures
 from datetime import datetime, timezone
@@ -63,6 +67,18 @@ _KIND_TO_FILENAME = {
 _REQUIRED_KINDS = (pb.FILE_KIND_TFLITE_MODEL, pb.FILE_KIND_LABEL_MAP)
 
 LOG_POLL_SECONDS = 0.5  # how often StreamLogs rechecks a quiet connection
+
+# ---- ExtractKeypoints ----
+# Mirrors the gateway's maxRecordingBytes (Backend/internal/learn/handler.go):
+# a 2-4 second sign clip is a few MB, so this only stops abuse.
+MAX_CLIP_BYTES = 100 * 1024 * 1024
+# Containers the landmarker's decoder is expected to open. The extension also
+# names the temp file, so this allow-list is what keeps a client-supplied
+# string out of the path — never interpolate request.info.extension directly.
+ALLOWED_CLIP_EXTENSIONS = frozenset(
+    {".webm", ".mp4", ".mov", ".mkv", ".avi", ".gif"}
+)
+DEFAULT_CLIP_EXTENSION = ".webm"
 
 
 class TslInferenceServicer(pb_grpc.TslInferenceServicer):
@@ -239,6 +255,134 @@ class TslInferenceServicer(pb_grpc.TslInferenceServicer):
             num_classes=num_classes,
             sequence_len=sequence_len,
             feature_dim=feature_dim,
+        )
+
+    # ---- ExtractKeypoints ----
+
+    def ExtractKeypoints(self, request_iterator, context):
+        """Client-streamed sign clip -> avatar keypoint frames JSON.
+
+        Offline and independent of the loaded LSTM: it touches neither the
+        interpreter nor any InferenceSession, so a running inference stream is
+        unaffected (it does compete for CPU while MediaPipe runs).
+        """
+        extension = DEFAULT_CLIP_EXTENSION
+        frame_count = 0
+        received = 0
+        tmp_path = None
+        clip = None
+        seen_info = False
+
+        def fail(code, detail):
+            if clip is not None:
+                clip.close()
+            if tmp_path is not None:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+            logger.warning("ExtractKeypoints rejected: %s", detail)
+            context.abort(code, detail)
+
+        try:
+            for request in request_iterator:
+                which = request.WhichOneof("payload")
+                if which == "info":
+                    if seen_info:
+                        fail(
+                            grpc.StatusCode.INVALID_ARGUMENT,
+                            "ExtractInfo may only be sent once, as the first message",
+                        )
+                    seen_info = True
+                    requested = request.info.extension.strip().lower()
+                    if requested:
+                        if requested not in ALLOWED_CLIP_EXTENSIONS:
+                            fail(
+                                grpc.StatusCode.INVALID_ARGUMENT,
+                                f"unsupported clip extension {requested!r}; "
+                                f"expected one of "
+                                f"{sorted(ALLOWED_CLIP_EXTENSIONS)}",
+                            )
+                        extension = requested
+                    frame_count = int(request.info.frames)
+                    fd, tmp_path = tempfile.mkstemp(
+                        prefix="signmind-clip-", suffix=extension
+                    )
+                    clip = os.fdopen(fd, "wb")
+                elif which == "chunk":
+                    if clip is None:
+                        fail(
+                            grpc.StatusCode.INVALID_ARGUMENT,
+                            "chunk received before ExtractInfo",
+                        )
+                    received += len(request.chunk)
+                    if received > MAX_CLIP_BYTES:
+                        fail(
+                            grpc.StatusCode.INVALID_ARGUMENT,
+                            f"clip exceeds the {MAX_CLIP_BYTES} byte limit",
+                        )
+                    clip.write(request.chunk)
+                else:
+                    fail(
+                        grpc.StatusCode.INVALID_ARGUMENT,
+                        "empty ExtractKeypointsRequest",
+                    )
+            if clip is not None:
+                clip.close()
+                clip = None
+        except OSError as exc:
+            fail(grpc.StatusCode.INTERNAL, f"cannot stage clip: {exc}")
+
+        if not seen_info:
+            fail(grpc.StatusCode.INVALID_ARGUMENT, "no ExtractInfo received")
+        if received == 0:
+            fail(grpc.StatusCode.INVALID_ARGUMENT, "clip is empty")
+
+        try:
+            # Imported here, not at module scope: MediaPipe/OpenCV are heavy
+            # and are only present in deployments that serve this RPC, so a
+            # service without them still starts and serves inference.
+            import extract_keypoints
+        except ImportError as exc:
+            fail(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                f"keypoint extraction is unavailable on this service: {exc}",
+            )
+
+        count = frame_count if frame_count > 0 else extract_keypoints.DEFAULT_FRAMES
+        try:
+            frames = extract_keypoints.extract(tmp_path, count)
+        except ImportError as exc:  # MediaPipe/OpenCV missing at call time
+            fail(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                f"keypoint extraction is unavailable on this service: {exc}",
+            )
+        except (RuntimeError, ValueError, OSError) as exc:
+            fail(
+                grpc.StatusCode.INVALID_ARGUMENT,
+                f"cannot extract keypoints from the clip: {exc}",
+            )
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+        if not frames:
+            fail(
+                grpc.StatusCode.INVALID_ARGUMENT,
+                "no frames extracted (empty or unreadable clip)",
+            )
+
+        logger.info(
+            "ExtractKeypoints: %d frames from a %d byte %s clip",
+            len(frames),
+            received,
+            extension,
+        )
+        return pb.ExtractKeypointsResponse(
+            frames_json=json.dumps(frames, ensure_ascii=False),
+            frame_count=len(frames),
         )
 
     # ---- StreamLogs ----

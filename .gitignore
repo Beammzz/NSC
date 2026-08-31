@@ -295,8 +295,12 @@ venv.bak/
 .spyderproject
 .spyproject
 
-# MediaPipe models auto-downloaded by extract_keypoints.py into the backend's
-# working dir on the first sign recording (never source; ~16MB).
+# MediaPipe models auto-downloaded by extract_keypoints.py into the working dir
+# of whichever process extracts (never source; ~16MB). That is now the Python
+# inference service (the Docker image bakes them in at build time); the
+# /Backend/ pair is left behind by the old host-exec extractor.
+/Inference_backend/pose_landmarker_full.task
+/Inference_backend/hand_landmarker.task
 /Backend/pose_landmarker_full.task
 /Backend/hand_landmarker.task
 
