@@ -1,0 +1,284 @@
+name: CI/CD
+
+# Tests run on every PR and on every push to main. The publish jobs are gated on
+# their matching test job AND on the push-to-main condition, so a merge is what
+# ships an artifact — a PR only ever proves the build.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# A newer push to the same branch cancels the older run, except on main, where
+# every merge must produce its own published artifacts.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.26"
+  NODE_VERSION: "22"
+  PYTHON_VERSION: "3.12"
+  JAVA_VERSION: "17"
+
+jobs:
+  # ---------------------------------------------------------------- tests ----
+  backend-test:
+    name: Backend — vet & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: Backend/webui/package-lock.json
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: Backend/go.sum
+
+      # Not optional: internal/webui/webui.go does `//go:embed all:dist`, and
+      # dist/ is gitignored. Without this step every Go command below fails with
+      # "pattern all:dist: no matching files found".
+      - name: Build admin webui (required for go:embed)
+        working-directory: Backend/webui
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: go vet
+        working-directory: Backend
+        run: go vet ./...
+
+      # Superset of the project's documented verify command (CLAUDE.md:
+      # `go vet ./... && go test ./...`). -race is included because it was
+      # measured clean on this tree before being added here — 8/8 packages ok,
+      # ~111s, of which internal/auth is 98s (bcrypt, amplified by the
+      # detector). Worth it for a server whose whole job is concurrent
+      # WebSocket and gRPC streaming. Drop the flag if that cost stops paying.
+      - name: go test
+        working-directory: Backend
+        run: go test -race ./...
+
+      - name: go build
+        working-directory: Backend
+        run: go build ./...
+
+  inference-test:
+    name: Inference — ruff & pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: Inference_backend/pyproject.toml
+
+      - name: Sync dev dependencies
+        working-directory: Inference_backend
+        run: uv sync --group dev
+
+      - name: ruff
+        working-directory: Inference_backend
+        run: uv run ruff check
+
+      - name: pytest
+        working-directory: Inference_backend
+        run: uv run pytest -q
+
+  frontend-test:
+    name: Frontend — analyze & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: flutter pub get
+        working-directory: Frontend
+        run: flutter pub get
+
+      - name: flutter analyze
+        working-directory: Frontend
+        run: flutter analyze
+
+      - name: flutter test
+        working-directory: Frontend
+        run: flutter test
+
+  # ------------------------------------------------------------- android -----
+  android:
+    name: Android — build APK & AAB
+    needs: frontend-test
+    runs-on: ubuntu-latest
+    # The `secrets` context is not available in a step-level `if:`, so the
+    # "was a keystore configured?" check has to read it through env instead.
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: flutter pub get
+        working-directory: Frontend
+        run: flutter pub get
+
+      # Optional: with no ANDROID_KEYSTORE_BASE64 secret the app falls back to
+      # the debug key (see Frontend/android/app/build.gradle.kts) and the build
+      # still succeeds — it just is not distributable as a Play update.
+      - name: Decode upload keystore
+        id: keystore
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/upload-keystore.jks"
+          echo "path=$RUNNER_TEMP/upload-keystore.jks" >> "$GITHUB_OUTPUT"
+
+      # PRs build debug only: it skips R8/proguard and is roughly half the wall
+      # time, while still catching Gradle, AGP and plugin breakage before merge.
+      - name: Build debug APK (pull request)
+        if: github.event_name == 'pull_request'
+        working-directory: Frontend
+        run: flutter build apk --debug
+
+      - name: Build release APK + AAB (main)
+        if: github.event_name != 'pull_request'
+        working-directory: Frontend
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ steps.keystore.outputs.path }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          flutter build apk --release --split-per-abi
+          flutter build appbundle --release
+
+      - name: Upload APKs
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: signmind-apk-${{ github.sha }}
+          path: Frontend/build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload AAB
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: signmind-aab-${{ github.sha }}
+          path: Frontend/build/app/outputs/bundle/release/*.aab
+          if-no-files-found: error
+          retention-days: 30
+
+  # -------------------------------------------------------------- docker -----
+  docker:
+    name: Docker — ${{ matrix.service }}
+    needs: [backend-test, inference-test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: backend
+            context: Backend
+            suffix: nsc-backend
+          - service: inference
+            context: Inference_backend
+            suffix: nsc-inference
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      # github.repository is "Beammzz/NSC"; GHCR rejects uppercase in an image
+      # name, so it has to be lowercased rather than used verbatim.
+      - name: Resolve image name
+        id: image
+        run: |
+          owner="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          echo "name=ghcr.io/${owner}/${{ matrix.suffix }}" >> "$GITHUB_OUTPUT"
+
+      # Only merges publish. PRs from forks have a read-only GITHUB_TOKEN, so
+      # attempting a login there would fail the job for no benefit.
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=long
+            type=ref,event=pr
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          # Only linux/amd64: both images have arm64-capable dependencies, but
+          # emulating the Next.js and pip stages under QEMU multiplies build time.
+          # Add linux/arm64 here when you need it.
+          platforms: linux/amd64
+          push: ${{ github.event_name == 'push' }}
+          load: ${{ github.event_name != 'push' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+      # Proves the image actually boots, not merely that it compiled.
+      - name: Smoke test backend image
+        if: matrix.service == 'backend'
+        run: |
+          tag="$(echo '${{ steps.meta.outputs.tags }}' | head -n1)"
+          docker run -d --name smoke -p 8080:8080 \
+            -e ENV=Prod \
+            -e SIGNMIND_JWT_SECRET=ci-smoke-test-secret \
+            -e SIGNMIND_AI_SHARED_SECRET=ci-smoke-test-secret \
+            "$tag"
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
+              echo "healthz OK after ${i}s"
+              curl -fsS http://127.0.0.1:8080/ | grep -q "<!DOCTYPE html>" \
+                && echo "embedded webui OK"
+              docker rm -f smoke >/dev/null
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::backend image never became healthy"
+          docker logs smoke
+          exit 1

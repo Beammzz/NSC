@@ -1,5 +1,77 @@
 # State
 
+## Goal (2026-08-30): active_model.json separator — Windows and Linux served different models
+Task (spawned from the CI/CD work): make the active-model pointer round-trip across OSes.
+ROOT CAUSE, both ends of one round trip in `Inference_backend/inference/engine.py`:
+  WRITER `activate_artifacts` used `os.path.relpath(artifact_dir, output_dir)`, which emits
+  `os.sep` — so a Windows UploadModel persisted `uploads\<utc-ts>` into the manifest.
+  READER `_resolve_artifact_dir` did `os.path.join(output_dir, rel)`; backslash is a legal POSIX
+  filename character, so Linux treated the whole string as ONE directory name, found nothing, and
+  fell through to the legacy root layout.
+IMPACT (worse than the original note claimed): the manifest selects
+`uploads/20260725T022950901648Z` = the 13-class reduced scan vocabulary the user asked for on
+2026-07-25 ("I need to reduce amount of sign available for scan"). Windows honoured it; every
+Linux/container deploy silently served the 150-class root model instead, while the admin UI
+reported the upload as active on both. That reduction had never actually shipped on Linux.
+FIX: writer normalises `os.sep` -> "/" (deliberately not a literal backslash, so a POSIX directory
+whose own name contains a backslash is left intact); reader accepts either separator. AttributeError
+added to the reader's except tuple — without it a non-string "dir" would newly crash instead of
+falling back. Committed manifest repointed to a forward slash. Inference_backend/AGENTS.md now
+records the POSIX-relative invariant so this cannot regress silently.
+CONSTRAINT NOTE: the 2026-07-25 "Do NOT edit label_map.json / the model" constraint was checked and
+does not bite — no label map and no .tflite was touched; only the pointer's separator changed, and
+the vocabulary it selects is unchanged. The edit implements that constraint's intent on Linux.
+VERIFIED 2026-08-30: `uv run ruff check` -> "All checks passed!"; `uv run pytest -q` -> "82 passed
+in 0.63s" (79 before, +3). Each new test was confirmed to FAIL with its own fix reverted; the reader
+test reproduces the exact production warning. The writer test fakes os.sep/os.path.relpath to a
+Windows host, because on a POSIX runner the un-normalised code is right by accident and the test
+could otherwise never fail. End-to-end: rebuilt inference image logs "Model loaded:
+tsl_lstm_f32.tflite (13 classes, window 30, features 441, idle_idx 12)" with no warning (was
+"150 classes ... idle_idx None" plus the fallback warning) — idle_idx is populated for the first
+time on Linux, so idle bypass works there now.
+
+## Goal (2026-08-30): CI/CD for Android + server, Docker images, Traefik HTTPS compose
+User: "I want you to build a CI/CD for both Android and Server on merge also run test and for
+the server build make it docker and also make an example-compose.yaml for docker compose with
+https for traefik."
+KEY CONSTRAINT FOUND FIRST: `Backend/internal/webui/webui.go:13` does `//go:embed all:dist`, and
+`internal/webui/dist` is gitignored — so on a fresh clone EVERY Go command (`go vet`, `go test`,
+`go build`) fails with `pattern all:dist: no matching files found`. Both the CI backend job and
+the Dockerfile therefore build `Backend/webui` (npm ci + npm run build) BEFORE any Go step.
+Do not "simplify" that step away.
+DELIVERED:
+- `.github/workflows/ci.yml` — tests on PR + push to main (backend vet/test -race/build,
+  inference ruff/pytest, frontend analyze/test); publish jobs gated on `needs:` + push to
+  main. Android: debug APK on PR, release APK (split-per-abi) + AAB on merge. Docker: matrix over
+  backend/inference -> GHCR, with a boot smoke test on the backend image.
+- `Backend/Dockerfile` (3 stages: node webui -> go build -> alpine runtime, 39.1 MB, non-root
+  uid 10001, network-free final stage) + `.dockerignore`.
+- `Inference_backend/Dockerfile` (python:3.12-slim + ai-edge-litert 2.2.0, 418 MB, non-root)
+  + `.dockerignore`. Runtime deps are read out of pyproject.toml with tomllib so they cannot drift.
+- `example-compose.yaml` + `.env.example` — traefik v3.7, HTTP->HTTPS redirect, Let's Encrypt
+  HTTP-01; inference sits on an `internal: true` network and is never published.
+- `Frontend/android/app/build.gradle.kts` — optional release signing from key.properties or
+  ANDROID_* env vars, falling back to the debug key exactly as before when absent.
+NO FORMAT GATES ON PURPOSE: `gofmt -l Backend` lists 5 of 37 files already unformatted on main
+(cmd/server/main.go, internal/admin/handler.go, internal/admin/handler_test.go, internal/auth/jwt.go,
+internal/predlog/store_test.go), so a gofmt step would land CI red on the first merge; reformatting
+them was out of scope for this task. `dart format --set-exit-if-changed` was dropped for the same
+reason plus being unverifiable here (no Flutter in the container). To adopt: `cd Backend && gofmt -w .`
+then re-add the step. `go test -race` IS enabled — unlike the format gates it was measured green
+first (race_exit=0, ~111s).
+VERIFIED 2026-08-30 (local, Docker 29.3.1): both images build; backend boots in Prod, `/healthz`
+200, embedded webui serves real HTML (proves the cross-stage go:embed chain), HEALTHCHECK healthy,
+SQLite WAL writes as uid 10001; inference loads the model (150 classes) and serves gRPC on
+0.0.0.0:50051; `docker compose up backend inference` -> both healthy, `depends_on: service_healthy`
+gates correctly, ZERO gRPC errors (shared-secret link works), `signmind_internal` has internal=true.
+`actionlint` clean; `docker compose config` valid and the `:?` guards reject an empty env.
+NOT VERIFIED LOCALLY: Flutter is not installed in this container, so `flutter analyze/test` and the
+Gradle signing change have never been executed — CI is their first run.
+RESOLVED 2026-08-30 (follow-up task, same session): the active_model.json Windows-path bug was
+fixed — see the next Goal block. My original note called it cosmetic on the grounds that "the
+fallback model is correct". That was WRONG: the fallback served 150 classes while the manifest
+selects the 13-class reduced scan vocabulary, so Windows and Linux ran different models.
+
 ## Goal (2026-07-24): S25 FE 5fps — analysis stream bound at 2992x2992
 User: "Why is my performance is terrible? even in the flagship (S25 FE)? like I currently get
 5 fps with no hand."
@@ -565,8 +637,12 @@ Inference_backend/inference/auth_interceptor.py. All uncommitted per the Constra
 has not asked to commit in this task's conversation).
 
 ## Constraints
-- Do not git push (user has never asked for a push).
-- Do not commit until the user asks; whole tree deliberately uncommitted.
+- 2026-08-30 user (CI/CD task): asked, when offered the choice, to "Commit and push to that
+  branch" — supersedes the two blanket rules below FOR THE CI/CD BRANCH
+  `claude/cicd-android-server-docker-xrd1tr` ONLY. Everywhere else the rules below still hold:
+  ask before committing, and never push without the user saying so in that conversation.
+- Do not git push (unless the user asks for a push in that conversation).
+- Do not commit until the user asks; whole tree otherwise deliberately uncommitted.
 - Shorebird OTA (`shorebird patch`) only when the user says they are satisfied.
 - Never delete files without pasting what will be lost and getting approval in-conversation.
 - 2026-07-19 user: "Delete lite model and also do Anything that will fix the low fps
