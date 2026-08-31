@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:signmind/features/auth/domain/models/auth_state.dart';
-import 'package:signmind/features/scanner/data/services/tsl_stream_service.dart';
 import 'package:signmind/features/settings/presentation/providers/settings_provider.dart';
 
 class AuthNotifier extends Notifier<AuthState> {
@@ -205,7 +204,12 @@ class AuthNotifier extends Notifier<AuthState> {
   }
 
   void logout() {
-    ref.read(tslStreamServiceProvider).stop();
+    // Deliberately does NOT touch tslStreamServiceProvider. That read made
+    // authProvider depend on the stream service, while the service already
+    // watches authProvider for the access token — a genuine cycle that
+    // Riverpod rejects as soon as anything else listens to auth. Stopping the
+    // stream is the scanner's job now: ScannerNotifier listens for logout and
+    // stops both services there.
     state = const AuthState();
   }
 }
