@@ -5,7 +5,7 @@ import warnings
 
 from . import tsl_inference_pb2 as tsl__inference__pb2
 
-GRPC_GENERATED_VERSION = '1.81.1'
+GRPC_GENERATED_VERSION = '1.83.1'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -44,6 +44,11 @@ class TslInferenceStub:
                 request_serializer=tsl__inference__pb2.UploadModelRequest.SerializeToString,
                 response_deserializer=tsl__inference__pb2.UploadModelResponse.FromString,
                 _registered_method=True)
+        self.ExtractKeypoints = channel.stream_unary(
+                '/signmind.inference.v1.TslInference/ExtractKeypoints',
+                request_serializer=tsl__inference__pb2.ExtractKeypointsRequest.SerializeToString,
+                response_deserializer=tsl__inference__pb2.ExtractKeypointsResponse.FromString,
+                _registered_method=True)
         self.StreamLogs = channel.unary_stream(
                 '/signmind.inference.v1.TslInference/StreamLogs',
                 request_serializer=tsl__inference__pb2.StreamLogsRequest.SerializeToString,
@@ -79,6 +84,19 @@ class TslInferenceServicer:
         config optional). The server validates the staged files (interpreter
         loads, label map parses) before hot-swapping; on any failure the
         previously loaded model stays live and the RPC returns an error status.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ExtractKeypoints(self, request_iterator, context):
+        """Turn a recorded sign clip into avatar keypoint frames (MediaPipe pose +
+        hand landmarkers). The client streams one ExtractInfo followed by the
+        clip's chunks; the server writes them to a temp file, runs the
+        landmarkers over it, and returns the frames as JSON. This is an offline,
+        one-shot job — it does NOT touch the realtime landmark path or the
+        loaded LSTM, and it is the only way the gateway extracts keypoints (the
+        gateway has no Python runtime of its own).
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -121,6 +139,11 @@ def add_TslInferenceServicer_to_server(servicer, server):
                     servicer.UploadModel,
                     request_deserializer=tsl__inference__pb2.UploadModelRequest.FromString,
                     response_serializer=tsl__inference__pb2.UploadModelResponse.SerializeToString,
+            ),
+            'ExtractKeypoints': grpc.stream_unary_rpc_method_handler(
+                    servicer.ExtractKeypoints,
+                    request_deserializer=tsl__inference__pb2.ExtractKeypointsRequest.FromString,
+                    response_serializer=tsl__inference__pb2.ExtractKeypointsResponse.SerializeToString,
             ),
             'StreamLogs': grpc.unary_stream_rpc_method_handler(
                     servicer.StreamLogs,
@@ -192,6 +215,33 @@ class TslInference:
             '/signmind.inference.v1.TslInference/UploadModel',
             tsl__inference__pb2.UploadModelRequest.SerializeToString,
             tsl__inference__pb2.UploadModelResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ExtractKeypoints(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_unary(
+            request_iterator,
+            target,
+            '/signmind.inference.v1.TslInference/ExtractKeypoints',
+            tsl__inference__pb2.ExtractKeypointsRequest.SerializeToString,
+            tsl__inference__pb2.ExtractKeypointsResponse.FromString,
             options,
             channel_credentials,
             insecure,

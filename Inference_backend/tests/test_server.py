@@ -277,6 +277,159 @@ class TestUploadModel:
         assert engine.artifact_dir == old_dir
 
 
+def extract_requests(clip=b"video-bytes", extension=".webm", frames=0, chunk=4):
+    """ExtractInfo followed by the clip in `chunk`-sized pieces."""
+    yield pb.ExtractKeypointsRequest(
+        info=pb.ExtractInfo(extension=extension, frames=frames)
+    )
+    for i in range(0, len(clip), chunk):
+        yield pb.ExtractKeypointsRequest(chunk=clip[i : i + chunk])
+
+
+class FakeExtract:
+    """Stands in for extract_keypoints.extract — no MediaPipe, no OpenCV.
+
+    Records the path and the frame count it was called with, and reads the
+    staged clip back so tests can prove the streamed bytes landed on disk.
+    """
+
+    def __init__(self, frames=None, raises=None):
+        self.frames = [[{"x": 0.1, "y": 0.2, "z": 0.0}]] if frames is None else frames
+        self.raises = raises
+        self.path = None
+        self.count = None
+        self.staged = None
+
+    def __call__(self, video_path, count):
+        self.path = video_path
+        self.count = count
+        with open(video_path, "rb") as fh:
+            self.staged = fh.read()
+        if self.raises is not None:
+            raise self.raises
+        return self.frames
+
+
+@pytest.fixture
+def fake_extract(monkeypatch):
+    """Install a FakeExtract, returning a setter so a test can pick behavior."""
+    import extract_keypoints
+
+    def install(**kwargs):
+        fake = FakeExtract(**kwargs)
+        monkeypatch.setattr(extract_keypoints, "extract", fake)
+        return fake
+
+    return install
+
+
+class TestExtractKeypoints:
+    def test_happy_path_returns_frames_json(self, stack, fake_extract):
+        stub, _, _ = stack
+        fake = fake_extract(frames=[[{"x": 0.5, "y": 0.25, "z": -0.1}], []])
+        clip = b"webm-bytes-that-span-several-chunks"
+
+        response = stub.ExtractKeypoints(extract_requests(clip=clip))
+
+        assert response.frame_count == 2
+        assert json.loads(response.frames_json) == [
+            [{"x": 0.5, "y": 0.25, "z": -0.1}],
+            [],
+        ]
+        # Every streamed byte reached the staged clip, in order.
+        assert fake.staged == clip
+
+    def test_extension_names_the_staged_file(self, stack, fake_extract):
+        stub, _, _ = stack
+        fake = fake_extract()
+        stub.ExtractKeypoints(extract_requests(extension=".mp4"))
+        assert fake.path.endswith(".mp4")
+
+    def test_staged_clip_is_removed_after_extraction(self, stack, fake_extract):
+        stub, _, _ = stack
+        fake = fake_extract()
+        stub.ExtractKeypoints(extract_requests())
+        assert not os.path.exists(fake.path)
+
+    def test_zero_frames_uses_the_extractor_default(self, stack, fake_extract):
+        import extract_keypoints
+
+        stub, _, _ = stack
+        fake = fake_extract()
+        stub.ExtractKeypoints(extract_requests(frames=0))
+        assert fake.count == extract_keypoints.DEFAULT_FRAMES
+
+    def test_explicit_frame_count_is_passed_through(self, stack, fake_extract):
+        stub, _, _ = stack
+        fake = fake_extract()
+        stub.ExtractKeypoints(extract_requests(frames=24))
+        assert fake.count == 24
+
+    def test_unsupported_extension_rejected(self, stack, fake_extract):
+        stub, _, _ = stack
+        fake = fake_extract()
+        with pytest.raises(grpc.RpcError) as excinfo:
+            stub.ExtractKeypoints(extract_requests(extension=".exe"))
+        assert excinfo.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+        assert fake.path is None  # never reached the extractor
+
+    def test_path_traversal_extension_rejected(self, stack, fake_extract):
+        stub, _, _ = stack
+        fake_extract()
+        with pytest.raises(grpc.RpcError) as excinfo:
+            stub.ExtractKeypoints(extract_requests(extension="/../../etc/passwd"))
+        assert excinfo.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+    def test_chunk_before_info_rejected(self, stack, fake_extract):
+        stub, _, _ = stack
+        fake_extract()
+        with pytest.raises(grpc.RpcError) as excinfo:
+            stub.ExtractKeypoints(iter([pb.ExtractKeypointsRequest(chunk=b"orphan")]))
+        assert excinfo.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+        assert "before ExtractInfo" in excinfo.value.details()
+
+    def test_empty_clip_rejected(self, stack, fake_extract):
+        stub, _, _ = stack
+        fake = fake_extract()
+        with pytest.raises(grpc.RpcError) as excinfo:
+            stub.ExtractKeypoints(extract_requests(clip=b""))
+        assert excinfo.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+        assert fake.path is None
+
+    def test_no_frames_extracted_rejected(self, stack, fake_extract):
+        stub, _, _ = stack
+        fake = fake_extract(frames=[])
+        with pytest.raises(grpc.RpcError) as excinfo:
+            stub.ExtractKeypoints(extract_requests())
+        assert excinfo.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+        assert not os.path.exists(fake.path)  # cleaned up on the failure path
+
+    def test_undecodable_clip_rejected(self, stack, fake_extract):
+        stub, _, _ = stack
+        fake = fake_extract(raises=RuntimeError("cannot open video: /tmp/x.webm"))
+        with pytest.raises(grpc.RpcError) as excinfo:
+            stub.ExtractKeypoints(extract_requests())
+        assert excinfo.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+        assert not os.path.exists(fake.path)
+
+    def test_missing_mediapipe_reports_failed_precondition(self, stack, fake_extract):
+        stub, _, _ = stack
+        fake_extract(raises=ImportError("No module named 'mediapipe'"))
+        with pytest.raises(grpc.RpcError) as excinfo:
+            stub.ExtractKeypoints(extract_requests())
+        assert excinfo.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+        assert "mediapipe" in excinfo.value.details()
+
+    def test_oversized_clip_rejected(self, stack, fake_extract, monkeypatch):
+        stub, _, _ = stack
+        fake = fake_extract()
+        monkeypatch.setattr(server, "MAX_CLIP_BYTES", 8)
+        with pytest.raises(grpc.RpcError) as excinfo:
+            stub.ExtractKeypoints(extract_requests(clip=b"x" * 64))
+        assert excinfo.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+        assert fake.path is None
+
+
 class TestStreamLogs:
     def test_history_replay(self, stack):
         stub, _, _ = stack

@@ -24,6 +24,15 @@ service TslInference {
   // previously loaded model stays live and the RPC returns an error status.
   rpc UploadModel(stream UploadModelRequest) returns (UploadModelResponse);
 
+  // Turn a recorded sign clip into avatar keypoint frames (MediaPipe pose +
+  // hand landmarkers). The client streams one ExtractInfo followed by the
+  // clip's chunks; the server writes them to a temp file, runs the
+  // landmarkers over it, and returns the frames as JSON. This is an offline,
+  // one-shot job — it does NOT touch the realtime landmark path or the
+  // loaded LSTM, and it is the only way the gateway extracts keypoints (the
+  // gateway has no Python runtime of its own).
+  rpc ExtractKeypoints(stream ExtractKeypointsRequest) returns (ExtractKeypointsResponse);
+
   // Server streams its log records to the gateway: first up to
   // `history_lines` buffered entries, then live entries until the client
   // cancels.
@@ -115,6 +124,38 @@ message UploadModelResponse {
   uint32 sequence_len = 3;
   // Model input feature dimension, read from the interpreter.
   uint32 feature_dim = 4;
+}
+
+// ---- ExtractKeypoints ----
+
+message ExtractInfo {
+  // Container extension of the clip, e.g. ".webm" or ".mp4" — the decoder is
+  // picked from it, so it must match the bytes that follow. Empty means
+  // ".webm" (what the admin webui's MediaRecorder produces).
+  string extension = 1;
+  // How many frames to emit. 0 uses the service default (16).
+  uint32 frames = 2;
+}
+
+message ExtractKeypointsRequest {
+  oneof payload {
+    // Starts the clip; must be the first message of the stream.
+    ExtractInfo info = 1;
+    // Next chunk of the clip (suggested <= 1 MiB per message).
+    bytes chunk = 2;
+  }
+}
+
+message ExtractKeypointsResponse {
+  // The avatar frames as a JSON array, exactly the shape the Flutter
+  // SignAvatar widget and the dictionary DB column expect:
+  //   [[{"x":..,"y":..,"z":..}, ...], ...]
+  // Carried as JSON rather than repeated messages so the gateway stores the
+  // service's own bytes verbatim — re-encoding floats gateway-side would
+  // change the stored payload (the extractor rounds to 5 decimals).
+  string frames_json = 1;
+  // Number of frames in frames_json, for logging and a cheap sanity check.
+  uint32 frame_count = 2;
 }
 
 // ---- StreamLogs ----

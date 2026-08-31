@@ -112,6 +112,10 @@ services:
       - traefik.http.routers.signmind.middlewares=signmind-sec
 
   inference:
+    # Also serves ExtractKeypoints (MediaPipe), which is what the admin
+    # Dictionary page's webcam recording and th-sl.com import call through the
+    # backend — the backend image has no Python, so extraction lives here and
+    # needs no configuration on either service.
     image: ghcr.io/beammzz/nsc-inference:latest
     restart: unless-stopped
     environment:

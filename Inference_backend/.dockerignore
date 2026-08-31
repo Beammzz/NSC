@@ -14,10 +14,8 @@ uv.lock
 tests/
 pyrightconfig.json
 
-# Keypoint extraction is invoked by the Go backend as a subprocess on the host
-# (SIGNMIND_KEYPOINT_PY / SIGNMIND_EXTRACT_SCRIPT); it is not part of the
-# gRPC service and pulls in MediaPipe, which this image does not install.
-extract_keypoints.py
+# extract_keypoints.py is deliberately NOT excluded: the ExtractKeypoints RPC
+# imports it, so it must be in the image (see the Dockerfile's extract extra).
 
 *.log
 .git

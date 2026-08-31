@@ -1,124 +1,130 @@
 // Package keypoint turns a recorded sign clip into avatar keypoint frames by
-// running the Python extract_keypoints.py CLI (MediaPipe pose+hand landmarks).
-// Extraction is an offline, one-shot job — deliberately off the realtime gRPC
-// landmark path — so the gateway simply execs the x64 Python interpreter.
+// calling the Python inference service's ExtractKeypoints RPC (MediaPipe
+// pose+hand landmarks). Extraction is an offline, one-shot job — deliberately
+// off the realtime landmark path — but it lives in the AI service because
+// that is where the Python runtime and MediaPipe are installed; the gateway
+// image ships a single static Go binary and no interpreter.
 package keypoint
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
-	"strconv"
-	"time"
+	"strings"
+
+	"google.golang.org/grpc"
+
+	"gitea.harumi.dev/Harumi/NSC/backend/internal/pb"
 )
 
-const defaultTimeout = 60 * time.Second
+// chunkLen is the clip chunk size per the proto contract's suggestion
+// (<= 1 MiB per message), matching the model-upload proxy in internal/admin.
+const chunkLen = 1 << 20
 
-// ErrNotConfigured is returned when the extractor has no interpreter/script
-// path set, so callers can reject recording uploads with a clear message.
+// defaultExtension mirrors the service-side default: the admin webui's
+// MediaRecorder produces WebM.
+const defaultExtension = ".webm"
+
+// ErrNotConfigured is returned when the extractor holds no AI client, so
+// callers can reject recording uploads with a clear message.
 var ErrNotConfigured = errors.New(
-	"keypoint: extractor not configured (set SIGNMIND_KEYPOINT_PY and SIGNMIND_EXTRACT_SCRIPT)")
+	"keypoint: extractor has no AI service client")
 
-// Runner executes a command and returns its stdout; on failure the error must
-// include stderr. exec.CommandContext is the production implementation; tests
-// inject a fake so no Python runtime is needed.
-type Runner interface {
-	Run(ctx context.Context, name string, args ...string) (stdout []byte, err error)
+// Client is the slice of the generated TslInference client this package uses.
+// *pb.TslInferenceClient satisfies it; tests inject a fake, so they need
+// neither a gRPC server nor a Python runtime.
+type Client interface {
+	ExtractKeypoints(ctx context.Context, opts ...grpc.CallOption) (
+		grpc.ClientStreamingClient[pb.ExtractKeypointsRequest, pb.ExtractKeypointsResponse], error)
 }
 
-// execRunner runs the command for real, surfacing stderr in the returned error.
-type execRunner struct{}
-
-func (execRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("%w: %s", err, stderr.String())
-	}
-	return stdout.Bytes(), nil
-}
-
-// Extractor invokes extract_keypoints.py to turn a clip into avatar keypoint
-// frames (JSON: [[{x,y,z},...],...]).
+// Extractor calls ExtractKeypoints on the AI service to turn a clip into
+// avatar keypoint frames (JSON: [[{x,y,z},...],...]).
 type Extractor struct {
-	python  string
-	script  string
-	frames  int
-	timeout time.Duration
-	runner  Runner
+	client Client
+	frames int
 }
 
-// New builds an Extractor. python is the (x64) interpreter with MediaPipe
-// installed; script is the path to extract_keypoints.py; frames is how many
-// frames to request (<=0 uses the script's own default).
-func New(python, script string, frames int) *Extractor {
-	return &Extractor{
-		python:  python,
-		script:  script,
-		frames:  frames,
-		timeout: defaultTimeout,
-		runner:  execRunner{},
-	}
+// New builds an Extractor over the AI service client. frames is how many
+// animation frames to request (<=0 lets the service pick its own default).
+func New(client Client, frames int) *Extractor {
+	return &Extractor{client: client, frames: frames}
 }
 
-// Configured reports whether both the interpreter and script paths are set.
+// Configured reports whether an AI service client is available.
 func (e *Extractor) Configured() bool {
-	return e != nil && e.python != "" && e.script != ""
+	return e != nil && e.client != nil
 }
 
-// ExtractReader writes r to a temp file (preserving ext) and extracts from it,
-// removing the temp file afterwards.
+// ExtractReader streams r to the AI service as the clip named by ext (e.g.
+// ".webm") and returns the validated keypoint-frame JSON. The whole call is
+// bounded by ctx — the service stages the clip and removes it itself.
 func (e *Extractor) ExtractReader(ctx context.Context, r io.Reader, ext string) (json.RawMessage, error) {
 	if !e.Configured() {
 		return nil, ErrNotConfigured
 	}
 	if ext == "" {
-		ext = ".webm"
+		ext = defaultExtension
 	}
-	tmp, err := os.CreateTemp("", "signmind-rec-*"+ext)
+
+	stream, err := e.client.ExtractKeypoints(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("keypoint: temp file: %w", err)
+		return nil, fmt.Errorf("keypoint extraction failed: opening stream: %w", err)
 	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if _, err := io.Copy(tmp, r); err != nil {
-		tmp.Close()
-		return nil, fmt.Errorf("keypoint: writing upload: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return nil, fmt.Errorf("keypoint: closing temp: %w", err)
-	}
-	return e.Extract(ctx, tmpPath)
-}
 
-// Extract runs the CLI over an existing video file and returns validated
-// keypoint-frame JSON.
-func (e *Extractor) Extract(ctx context.Context, videoPath string) (json.RawMessage, error) {
-	if !e.Configured() {
-		return nil, ErrNotConfigured
-	}
-	ctx, cancel := context.WithTimeout(ctx, e.timeout)
-	defer cancel()
-
-	args := []string{e.script, videoPath}
+	info := &pb.ExtractInfo{Extension: strings.ToLower(ext)}
 	if e.frames > 0 {
-		args = append(args, "--frames", strconv.Itoa(e.frames))
+		info.Frames = uint32(e.frames)
 	}
-	out, err := e.runner.Run(ctx, e.python, args...)
+	err = stream.Send(&pb.ExtractKeypointsRequest{
+		Payload: &pb.ExtractKeypointsRequest_Info{Info: info},
+	})
+	if err != nil {
+		return nil, finish(stream, err)
+	}
+
+	for {
+		buf := make([]byte, chunkLen) // fresh buffer: Send retains it
+		n, readErr := r.Read(buf)
+		if n > 0 {
+			sendErr := stream.Send(&pb.ExtractKeypointsRequest{
+				Payload: &pb.ExtractKeypointsRequest_Chunk{Chunk: buf[:n]},
+			})
+			if sendErr != nil {
+				return nil, finish(stream, sendErr)
+			}
+		}
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			return nil, fmt.Errorf("keypoint: reading upload: %w", readErr)
+		}
+	}
+
+	resp, err := stream.CloseAndRecv()
 	if err != nil {
 		return nil, fmt.Errorf("keypoint extraction failed: %w", err)
 	}
-	return validateFrames(out)
+	return validateFrames([]byte(resp.GetFramesJson()))
 }
 
-// validateFrames ensures the CLI emitted a non-empty JSON array of {x,y,z}
+// finish turns a Send failure into the definitive error: a stream that the
+// service aborted fails Send with a generic EOF, and the real gRPC status
+// only arrives from CloseAndRecv.
+func finish(
+	stream grpc.ClientStreamingClient[pb.ExtractKeypointsRequest, pb.ExtractKeypointsResponse],
+	sendErr error,
+) error {
+	if _, recvErr := stream.CloseAndRecv(); recvErr != nil {
+		sendErr = recvErr
+	}
+	return fmt.Errorf("keypoint extraction failed: %w", sendErr)
+}
+
+// validateFrames ensures the service emitted a non-empty JSON array of {x,y,z}
 // frames, then returns the raw bytes for storage.
 func validateFrames(out []byte) (json.RawMessage, error) {
 	var frames [][]struct {
@@ -127,7 +133,7 @@ func validateFrames(out []byte) (json.RawMessage, error) {
 		Z float64 `json:"z"`
 	}
 	if err := json.Unmarshal(out, &frames); err != nil {
-		return nil, fmt.Errorf("keypoint: unparseable CLI output: %w", err)
+		return nil, fmt.Errorf("keypoint: unparseable service output: %w", err)
 	}
 	if len(frames) == 0 {
 		return nil, errors.New("keypoint: extractor returned no frames")

@@ -865,3 +865,37 @@ Live probe on throwaway :8099 + scratch DB: 6 progress rows -> DELETE topic 1 ->
 reset still reports attempts=1 per word with learners_passed dropped to 0 (log kept, pass cleared).
 Re-practising exercise 1 at 0.4 -> {"best_confidence":0.4,"passed":false,"attempts":2} — i.e.
 practisable again from zero, tally continuing. Bad topic id -> HTTP 400; no token -> HTTP 401.
+
+## Goal (2026-08-31): move keypoint extraction into the inference container (built, uncommitted)
+User hit "Recording unavailable: keypoint extraction is not configured on this server" on the Docker
+deployment (signmind.harumi.dev). ROOT CAUSE (same gate as the 2026-07-14 entry, different reason —
+not a regression of that fix): `docker compose exec backend env | grep SIGNMIND_KEYPOINT` -> empty.
+example-compose.yaml never set SIGNMIND_KEYPOINT_PY/SIGNMIND_EXTRACT_SCRIPT, and setting them could
+not have helped: the backend image is alpine:3.22 with a deliberate no-apk-add policy (no Python at
+all), and Inference_backend/.dockerignore explicitly kept extract_keypoints.py OUT of the AI image.
+Host-exec extraction is simply unbuildable in the container deployment. User chose, of the two
+options offered: "move extraction into the inference container".
+DONE: new `ExtractKeypoints` client-streaming RPC (docs/api/tsl_inference.proto; both stub sets
+regenerated — note protoc moved 6.33.5 -> 7.35.1, which is most of the pb diff). server.py streams
+the clip to a temp file, calls extract_keypoints.extract(), returns frames as JSON (a string, not
+repeated messages, so the gateway stores the service's own bytes — re-encoding floats Go-side would
+change the stored payload). Backend/internal/keypoint rewritten over gRPC (exec Runner, temp file
+and the path-based Extract() are gone; Configured() now means "has an AI client"); learn/handler.go
+UNCHANGED — the KeypointExtractor interface kept its shape. Config keys SIGNMIND_KEYPOINT_PY /
+SIGNMIND_EXTRACT_SCRIPT deleted (config.go, dev.ps1, docs swept). mediapipe is a new `extract` extra
+in pyproject (>=0.10.35: every earlier release pins protobuf<5, which fights the stubs' protobuf>=5.27;
+cv2 comes via mediapipe's own opencv-contrib-python — do NOT also add opencv-python).
+Verified: Backend go vet clean + go test ./... all ok; Inference_backend ruff clean + pytest 95 passed
+(82 baseline + 13 new ExtractKeypoints tests). REAL (unfaked) E2E in this container: synthetic mp4 ->
+real gRPC channel -> real MediaPipe -> 6 frames x 7 pose points; garbage bytes -> INVALID_ARGUMENT
+"cannot open video".
+That E2E caught a Dockerfile defect before it shipped: python:3.12-slim needs libgl1 + libglib2.0-0
+(cv2) AND libegl1 + libgles2 (the GL context each landmarker creates). With only the first two,
+extraction fails at the first call with "libEGL.so.1: cannot open shared object file" while the rest
+of the service runs fine. The Dockerfile also prefetches the two .task models (~16MB) at build time:
+extract_keypoints downloads them into the cwd on first use, and at runtime that is the unprivileged
+signmind user against a root-owned /app -> EACCES on every extraction.
+NOT VERIFIED (no docker daemon in this session): the actual image build, and image size — expect
+roughly +400MB on the inference image from mediapipe + opencv + matplotlib.
+NEXT: user rebuilds/pulls the inference image (backend image unchanged in behavior but must be
+rebuilt too — the gateway binary changed), then records a sign in the admin Dictionary page.
